@@ -1,39 +1,7 @@
-.DS_Store
-**/.DS_Store
-*.log
-*.tmp
-
-# Python cache and build output
-__pycache__/
-**/__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-*.egg-info/
-**/*.egg-info/
-build/
-dist/
-
-# Local environments and caches
 .venv/
-**/.venv/
-.uv-cache/
-**/.uv-cache/
-.viz/
-**/.viz/
-
-# Local data and editor noise
-.idea/
-.vscode/
-
-# Unrelated local projects in this workspace
-F1WebGLGame/
-환율퀀트/
-smart-booking-system/
-
-# Runtime snapshot archives
-quant-pipeline/data/snapshots/*
-!quant-pipeline/data/snapshots/.gitkeep
+.venv311/
+__pycache__/
+*.pyc
+restaurant_booking.db
+frontend/node_modules/
+frontend/dist/
