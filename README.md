@@ -6,6 +6,7 @@ Multi-asset FX dashboard and quant backend for exchange rates, US Treasuries, eq
 
 - `fx-dashboard/`: browser UI and client-side visualization layer
 - `quant-pipeline/`: FastAPI + quant research/backend layer
+- `smart-booking-system/`: restaurant reservation system with waitlist and payment TTL
 - `run_fx_dashboard.sh`: start the full local app
 - `setup_fx_dashboard.sh`: create the Python environment and install dependencies
 - `Dockerfile`: containerized runtime for publishing or sharing
@@ -46,3 +47,5 @@ If you are reviewing or publishing this repository, the main files to inspect fi
 - `quant-pipeline/src/quant_pipeline/api/app.py`
 - `quant-pipeline/src/quant_pipeline/pipelines/data/nodes.py`
 - `quant-pipeline/src/quant_pipeline/pipelines/signals/nodes.py`
+- `smart-booking-system/app/main.py`
+- `smart-booking-system/app/engine.py`
