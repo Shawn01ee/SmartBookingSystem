@@ -1,2 +1,0 @@
-"""Signal and portfolio pipeline."""
-
