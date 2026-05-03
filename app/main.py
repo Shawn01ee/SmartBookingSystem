@@ -103,7 +103,7 @@ def serialize_slot(slot: Slot) -> dict:
 
 def serialize_dashboard(db: Session) -> dict:
     restaurants = db.query(Restaurant).order_by(Restaurant.name.asc()).all()
-    slots = db.query(Slot).order_by(Slot.day.asc(), Slot.time.asc()).all()
+    slots = db.query(Slot).filter(Slot.day >= date.today()).order_by(Slot.day.asc(), Slot.time.asc()).all()
     waitlists = db.query(WaitlistRequest).order_by(WaitlistRequest.created_at.desc()).limit(100).all()
     logs = db.query(NotificationLog).order_by(NotificationLog.sent_at.desc()).limit(100).all()
 
