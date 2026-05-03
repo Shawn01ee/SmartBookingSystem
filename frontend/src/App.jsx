@@ -314,13 +314,13 @@ function GuestPage() {
         </nav>
 
         <div className="hero-content">
-          <div className="hero-eyebrow">파인다이닝 · 레스토랑 예약 시스템</div>
+          <div className="hero-eyebrow">FINE DINING RESERVATION PLATFORM</div>
           <div className="hero-title">
-            Smart<br /><em>Booking</em>
+            Smart <em>Booking</em> System
           </div>
           <div className="hero-bottom">
             <div className="hero-desc">
-              테이블 단위 배정, 보증금 결제, 취소 발생 시 대기자 순차 알림까지 하나의 흐름으로 연결된 예약 경험.
+              미슐랭 가이드 레스토랑을 위한<br />세련된 예약 경험. 당신의 특별한 저녁을 시작하세요.
             </div>
             <div className="hero-cta">
               <button className="btn-ghost-light secondary" onClick={openWaitlist}>대기 등록</button>
