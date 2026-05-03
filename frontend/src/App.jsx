@@ -1,17 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const ADMIN_KEY = "smart-booking-admin-token";
+const DEPOSIT_PER_PERSON = 5000;
+const DAY_KO = ["일", "월", "화", "수", "목", "금", "토"];
 
 function getRoute(pathname = window.location.pathname) {
-  if (pathname.startsWith("/admin")) {
-    return { name: "admin" };
-  }
-  if (pathname.startsWith("/claim/")) {
-    return { name: "claim", token: pathname.split("/").pop() };
-  }
-  if (pathname.startsWith("/pay/")) {
-    return { name: "pay", token: pathname.split("/").pop() };
-  }
+  if (pathname.startsWith("/admin")) return { name: "admin" };
+  if (pathname.startsWith("/claim/")) return { name: "claim", token: pathname.split("/").pop() };
+  if (pathname.startsWith("/pay/")) return { name: "pay", token: pathname.split("/").pop() };
   return { name: "guest" };
 }
 
@@ -21,6 +17,14 @@ function normalizeEmail(value) {
 
 function formatTime(value) {
   return String(value || "").slice(0, 5);
+}
+
+function fmtDate(dateStr) {
+  if (!dateStr) return "—";
+  const d = new Date(dateStr + "T00:00:00");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${mm}.${dd}(${DAY_KO[d.getDay()]})`;
 }
 
 function groupedSlots(slots) {
@@ -38,653 +42,552 @@ async function apiFetch(path, options = {}, adminToken = null) {
   if (!headers.has("Content-Type") && options.body && !(options.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }
-  if (adminToken) {
-    headers.set("X-Admin-Token", adminToken);
-  }
-
+  if (adminToken) headers.set("X-Admin-Token", adminToken);
   const response = await fetch(path, { ...options, headers });
   if (!response.ok) {
     let detail = `Request failed: ${response.status}`;
     try {
       const payload = await response.json();
-      if (payload.detail) {
-        detail = payload.detail;
-      }
-    } catch (_error) {
-      // Ignore invalid JSON payloads.
-    }
+      if (payload.detail) detail = payload.detail;
+    } catch (_) {}
     throw new Error(detail);
   }
-
-  const contentType = response.headers.get("content-type") || "";
-  if (contentType.includes("application/json")) {
-    return response.json();
-  }
+  const ct = response.headers.get("content-type") || "";
+  if (ct.includes("application/json")) return response.json();
   return null;
 }
 
-function Message({ message }) {
-  if (!message) {
-    return null;
-  }
-  return <div className={`message ${message.kind}`}>{message.text}</div>;
-}
-
 function StatusBadge({ status }) {
-  const safe = status || "unknown";
-  return <span className={`status ${safe}`}>{safe}</span>;
+  const s = status || "unknown";
+  return <span className={`status-badge ${s}`}>{s}</span>;
 }
 
-function Layout({ children }) {
-  return (
-    <div className="app-shell">
-      <header className="topbar">
-        <div className="brand">
-          <div className="brand-mark">SB</div>
-          <div className="brand-copy">
-            <h1>Smart Booking System</h1>
-            <p>취소, 대기, 결제까지 연결된 식당 예약 엔진</p>
-          </div>
-        </div>
-        <nav className="nav-links">
-          <a href="/">Guest</a>
-          <a href="/admin">Admin</a>
-        </nav>
-      </header>
-      {children}
-    </div>
-  );
-}
-
-function VerificationBox({
-  prefix,
-  email,
-  verificationState,
-  onCodeChange,
-  onRequestCode,
-  onConfirmCode,
-}) {
-  const verified = normalizeEmail(email) && verificationState.verifiedEmail === normalizeEmail(email);
-
-  return (
-    <div className="mini-card">
-      <div className="card-head">
-        <strong>이메일 인증</strong>
-        {verified ? (
-          <span className="status verified">인증 완료</span>
-        ) : (
-          <span className="status pending">인증 필요</span>
-        )}
-      </div>
-      <Message message={verificationState.message} />
-      <div className="form-grid">
-        <label className="field">
-          <span>인증번호</span>
-          <input
-            id={`${prefix}-verification-code`}
-            value={verificationState.code}
-            onChange={(event) => onCodeChange(event.target.value)}
-            placeholder="6자리 코드"
-          />
-        </label>
-        <div className="field">
-          <span>메일 발송 / 확인</span>
-          <div className="button-row">
-            <button className="btn secondary small" type="button" onClick={onRequestCode}>
-              코드 보내기
-            </button>
-            <button className="btn primary small" type="button" onClick={onConfirmCode}>
-              코드 확인
-            </button>
-          </div>
-        </div>
-      </div>
-      <p className="muted verification-note">예약과 대기 등록 전, 현재 입력한 이메일로 인증을 완료해야 합니다.</p>
-    </div>
-  );
-}
-
+// ── GUEST PAGE ──────────────────────────────────────────────
 function GuestPage() {
   const [restaurants, setRestaurants] = useState([]);
   const [selectedRestaurantId, setSelectedRestaurantId] = useState("");
   const [slots, setSlots] = useState([]);
-  const [message, setMessage] = useState(null);
-  const [waitMessage, setWaitMessage] = useState(null);
-  const [reservationVerification, setReservationVerification] = useState({
-    code: "",
-    verifiedEmail: "",
-    message: null,
-  });
-  const [waitlistVerification, setWaitlistVerification] = useState({
-    code: "",
-    verifiedEmail: "",
-    message: null,
-  });
-  const [reservationForm, setReservationForm] = useState({
-    slot_id: "",
-    party_size: "2",
-    guest_name: "",
-    guest_email: "",
-    phone_number: "",
-  });
-  const [waitlistForm, setWaitlistForm] = useState({
-    day: "",
-    time_start: "18:00",
-    time_end: "20:00",
-    party_size: "2",
-    guest_name: "",
-    guest_email: "",
-    phone_number: "",
-    notes: "",
-  });
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    let active = true;
-    async function loadRestaurants() {
-      setLoading(true);
-      try {
-        const data = await apiFetch("/api/public/restaurants");
-        if (!active) {
-          return;
-        }
-        setRestaurants(data);
-        setSelectedRestaurantId((current) => current || String(data[0]?.id || ""));
-      } catch (error) {
-        if (active) {
-          setMessage({ kind: "error", text: error.message });
-        }
-      } finally {
-        if (active) {
-          setLoading(false);
-        }
-      }
-    }
+  // modal state
+  const [modal, setModal] = useState(null); // null | 'booking' | 'guest' | 'deposit' | 'waitlist'
+  const [step, setStep] = useState(1);
 
-    loadRestaurants();
-    return () => {
-      active = false;
-    };
+  // booking selections
+  const [selDay, setSelDay] = useState(null);
+  const [selSlotId, setSelSlotId] = useState(null);
+  const [selParty, setSelParty] = useState(2);
+
+  // guest info
+  const [guestName, setGuestName] = useState("");
+  const [guestPhone, setGuestPhone] = useState("");
+  const [guestEmail, setGuestEmail] = useState("");
+  const [verCode, setVerCode] = useState("");
+  const [verifiedEmail, setVerifiedEmail] = useState("");
+  const [verMsg, setVerMsg] = useState(null);
+
+  // success
+  const [view, setView] = useState("hero"); // hero | success
+  const [booking, setBooking] = useState(null);
+  const [modalMsg, setModalMsg] = useState(null);
+
+  // waitlist
+  const [waitDay, setWaitDay] = useState("");
+  const [waitTimeStart, setWaitTimeStart] = useState("18:00");
+  const [waitTimeEnd, setWaitTimeEnd] = useState("20:00");
+  const [waitParty, setWaitParty] = useState(2);
+  const [waitName, setWaitName] = useState("");
+  const [waitPhone, setWaitPhone] = useState("");
+  const [waitEmail, setWaitEmail] = useState("");
+  const [waitNotes, setWaitNotes] = useState("");
+  const [waitVerCode, setWaitVerCode] = useState("");
+  const [waitVerifiedEmail, setWaitVerifiedEmail] = useState("");
+  const [waitVerMsg, setWaitVerMsg] = useState(null);
+  const [waitMsg, setWaitMsg] = useState(null);
+
+  const heroBgRef = useRef(null);
+
+  useEffect(() => {
+    const t = setTimeout(() => { if (heroBgRef.current) heroBgRef.current.classList.add("loaded"); }, 100);
+    return () => clearTimeout(t);
   }, []);
 
   useEffect(() => {
-    if (!selectedRestaurantId) {
-      setSlots([]);
-      return;
-    }
-
     let active = true;
-    async function loadSlots() {
+    async function load() {
+      setLoading(true);
       try {
-        const data = await apiFetch(`/api/public/restaurants/${selectedRestaurantId}/slots`);
-        if (!active) {
-          return;
-        }
-        setSlots(data);
-        setReservationForm((current) => ({
-          ...current,
-          slot_id:
-            data.some((slot) => String(slot.id) === String(current.slot_id))
-              ? current.slot_id
-              : String(data[0]?.id || ""),
-        }));
-        setWaitlistForm((current) => ({
-          ...current,
-          day: current.day || data[0]?.day || "",
-        }));
-      } catch (error) {
-        if (active) {
-          setMessage({ kind: "error", text: error.message });
-        }
+        const data = await apiFetch("/api/public/restaurants");
+        if (!active) return;
+        setRestaurants(data);
+        setSelectedRestaurantId(String(data[0]?.id || ""));
+      } finally {
+        if (active) setLoading(false);
       }
     }
+    load();
+    return () => { active = false; };
+  }, []);
 
-    loadSlots();
-    return () => {
-      active = false;
-    };
+  useEffect(() => {
+    if (!selectedRestaurantId) { setSlots([]); return; }
+    let active = true;
+    apiFetch(`/api/public/restaurants/${selectedRestaurantId}/slots`).then(data => {
+      if (!active) return;
+      setSlots(data);
+      if (data[0]) {
+        setSelDay(data[0].day);
+        setSelSlotId(data[0].id);
+        setWaitDay(data[0].day);
+      }
+    }).catch(() => {});
+    return () => { active = false; };
   }, [selectedRestaurantId]);
 
-  const selectedRestaurant = restaurants.find(
-    (restaurant) => String(restaurant.id) === String(selectedRestaurantId),
-  );
-
   const slotGroups = groupedSlots(slots);
+  const timeSlotsForDay = slots.filter(s => s.day === selDay);
+  const selectedSlot = slots.find(s => s.id === selSlotId);
+  const selectedRestaurant = restaurants.find(r => String(r.id) === String(selectedRestaurantId));
+  const deposit = selParty * DEPOSIT_PER_PERSON;
 
-  async function requestEmailVerification(email, setter) {
-    const normalized = normalizeEmail(email);
-    if (!normalized) {
-      setter((current) => ({ ...current, message: { kind: "error", text: "이메일을 먼저 입력해 주세요." } }));
-      return;
-    }
+  function openBooking() {
+    setStep(1); setModal("booking");
+    setModalMsg(null); setVerMsg(null);
+    if (slots[0]) { setSelDay(slots[0].day); setSelSlotId(slots[0].id); }
+  }
+  function openWaitlist() { setModal("waitlist"); setWaitMsg(null); setWaitVerMsg(null); }
+  function closeModal() { setModal(null); setModalMsg(null); }
 
-    setter((current) => ({ ...current, message: null }));
+  async function requestCode(email, setMsg) {
+    const n = normalizeEmail(email);
+    if (!n) { setMsg({ kind: "error", text: "이메일을 입력해 주세요." }); return; }
+    setMsg(null);
     try {
       await apiFetch("/api/public/email-verifications/request", {
-        method: "POST",
-        body: JSON.stringify({ email: normalized }),
+        method: "POST", body: JSON.stringify({ email: n }),
       });
-      setter((current) => ({ ...current, message: { kind: "info", text: "인증번호를 이메일로 보냈습니다." } }));
-    } catch (error) {
-      setter((current) => ({ ...current, message: { kind: "error", text: error.message } }));
-    }
+      setMsg({ kind: "info", text: "인증번호를 이메일로 보냈습니다." });
+    } catch (e) { setMsg({ kind: "error", text: e.message }); }
   }
 
-  async function confirmEmailVerification(email, verificationState, setter) {
-    const normalized = normalizeEmail(email);
-    if (!normalized) {
-      setter((current) => ({ ...current, message: { kind: "error", text: "이메일을 먼저 입력해 주세요." } }));
-      return;
-    }
-    if (!verificationState.code.trim()) {
-      setter((current) => ({ ...current, message: { kind: "error", text: "인증번호를 입력해 주세요." } }));
-      return;
-    }
-
-    setter((current) => ({ ...current, message: null }));
+  async function confirmCode(email, code, setVerified, setMsg) {
+    const n = normalizeEmail(email);
+    if (!n) { setMsg({ kind: "error", text: "이메일을 입력해 주세요." }); return; }
+    if (!code.trim()) { setMsg({ kind: "error", text: "인증번호를 입력해 주세요." }); return; }
+    setMsg(null);
     try {
       await apiFetch("/api/public/email-verifications/confirm", {
-        method: "POST",
-        body: JSON.stringify({ email: normalized, code: verificationState.code.trim() }),
+        method: "POST", body: JSON.stringify({ email: n, code: code.trim() }),
       });
-      setter((current) => ({
-        ...current,
-        verifiedEmail: normalized,
-        message: { kind: "info", text: "이메일 인증이 완료되었습니다." },
-      }));
-    } catch (error) {
-      setter((current) => ({ ...current, message: { kind: "error", text: error.message } }));
+      setVerified(n);
+      setMsg({ kind: "info", text: "인증이 완료되었습니다." });
+    } catch (e) { setMsg({ kind: "error", text: e.message }); }
+  }
+
+  async function submitReservation() {
+    setModalMsg(null);
+    if (verifiedEmail !== normalizeEmail(guestEmail)) {
+      setModalMsg({ kind: "error", text: "이메일 인증을 완료해 주세요." }); return;
     }
-  }
-
-  function updateReservationField(field, value) {
-    setReservationForm((current) => {
-      const next = { ...current, [field]: value };
-      if (field === "guest_email" && reservationVerification.verifiedEmail) {
-        const normalized = normalizeEmail(value);
-        if (reservationVerification.verifiedEmail !== normalized) {
-          setReservationVerification({ code: "", verifiedEmail: "", message: null });
-        }
-      }
-      return next;
-    });
-  }
-
-  function updateWaitlistField(field, value) {
-    setWaitlistForm((current) => {
-      const next = { ...current, [field]: value };
-      if (field === "guest_email" && waitlistVerification.verifiedEmail) {
-        const normalized = normalizeEmail(value);
-        if (waitlistVerification.verifiedEmail !== normalized) {
-          setWaitlistVerification({ code: "", verifiedEmail: "", message: null });
-        }
-      }
-      return next;
-    });
-  }
-
-  async function submitReservation(event) {
-    event.preventDefault();
-    setMessage(null);
-    if (reservationVerification.verifiedEmail !== normalizeEmail(reservationForm.guest_email)) {
-      setMessage({ kind: "error", text: "예약 전에 이메일 인증을 완료해 주세요." });
-      return;
-    }
-
     try {
       const result = await apiFetch(
         `/api/public/restaurants/${selectedRestaurantId}/reservations`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            slot_id: Number(reservationForm.slot_id),
-            party_size: Number(reservationForm.party_size),
-            guest_name: reservationForm.guest_name,
-            guest_email: reservationForm.guest_email,
-            phone_number: reservationForm.phone_number,
-          }),
-        },
+        { method: "POST", body: JSON.stringify({
+          slot_id: Number(selSlotId),
+          party_size: selParty,
+          guest_name: guestName,
+          guest_email: guestEmail,
+          phone_number: guestPhone,
+        })},
       );
-
       if (!result.ok && result.status === "waitlist_recommended") {
-        setMessage({
-          kind: "info",
-          text: "해당 슬롯은 이미 만석입니다. 아래 대기 등록으로 이어가면 취소 발생 시 순차 알림을 받을 수 있어요.",
-        });
+        setModalMsg({ kind: "error", text: "해당 슬롯은 만석입니다. 대기 등록을 이용해 주세요." });
         return;
       }
-
       window.location.href = `/pay/${result.payment_token}`;
-    } catch (error) {
-      setMessage({ kind: "error", text: error.message });
-    }
+    } catch (e) { setModalMsg({ kind: "error", text: e.message }); }
   }
 
-  async function submitWaitlist(event) {
-    event.preventDefault();
-    setWaitMessage(null);
-    if (waitlistVerification.verifiedEmail !== normalizeEmail(waitlistForm.guest_email)) {
-      setWaitMessage({ kind: "error", text: "대기 신청 전에 이메일 인증을 완료해 주세요." });
-      return;
+  async function submitWaitlist() {
+    setWaitMsg(null);
+    if (waitVerifiedEmail !== normalizeEmail(waitEmail)) {
+      setWaitMsg({ kind: "error", text: "이메일 인증을 완료해 주세요." }); return;
     }
-
     try {
       const result = await apiFetch(
         `/api/public/restaurants/${selectedRestaurantId}/waitlist`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            day: waitlistForm.day,
-            time_start: `${waitlistForm.time_start}:00`,
-            time_end: `${waitlistForm.time_end}:00`,
-            party_size: Number(waitlistForm.party_size),
-            guest_name: waitlistForm.guest_name,
-            guest_email: waitlistForm.guest_email,
-            phone_number: waitlistForm.phone_number,
-            notes: waitlistForm.notes,
-          }),
-        },
+        { method: "POST", body: JSON.stringify({
+          day: waitDay,
+          time_start: `${waitTimeStart}:00`,
+          time_end: `${waitTimeEnd}:00`,
+          party_size: waitParty,
+          guest_name: waitName,
+          guest_email: waitEmail,
+          phone_number: waitPhone,
+          notes: waitNotes,
+        })},
       );
-
-      setWaitMessage({
-        kind: "info",
-        text: `대기 등록이 완료됐어요. 요청 번호는 #${result.waitlist_id} 입니다.`,
-      });
-    } catch (error) {
-      setWaitMessage({ kind: "error", text: error.message });
-    }
+      setWaitMsg({ kind: "info", text: `대기 등록 완료. 요청 번호 #${result.waitlist_id}` });
+    } catch (e) { setWaitMsg({ kind: "error", text: e.message }); }
   }
+
+  const STEP_LABELS = { booking: "01 — 날짜 및 인원", guest: "02 — 방문자 정보", deposit: "03 — 예약금 안내" };
+  const STEP_TITLES = { booking: "예약 날짜 선택", guest: "방문자 정보 입력", deposit: "예약금 안내" };
+  const STEP_NUM = { booking: 1, guest: 2, deposit: 3 };
+
+  const canStep1 = selSlotId && selParty;
+  const canStep2 = guestName && guestPhone && verifiedEmail && verifiedEmail === normalizeEmail(guestEmail);
 
   if (loading) {
     return (
-      <Layout>
-        <section className="panel">
-          <div className="empty">불러오는 중입니다...</div>
-        </section>
-      </Layout>
+      <div className="screen active" style={{ background: "var(--ink)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <span style={{ fontFamily: "'Cormorant SC', serif", letterSpacing: "0.3em", fontSize: 12, color: "rgba(255,255,255,0.4)" }}>LOADING</span>
+      </div>
     );
   }
 
   return (
-    <Layout>
-      <section className="hero">
-        <div className="hero-card hero-main">
-          <div className="pill">React + Vite UI</div>
-          <h2>빈자리 생기면 자동으로 이어지는 식당 예약 경험</h2>
-          <p>
-            이 웹사이트는 식당이 직접 쓰는 자체 예약 시스템입니다. 테이블 단위 배정, 보증금 결제,
-            취소 발생 시 대기자 순차 알림까지 하나의 흐름으로 연결돼 있어요.
-          </p>
-          <div className="hero-points">
-            <div className="hero-point">
-              <strong>테이블 배정</strong>
-              <span>단일 테이블 우선, 없으면 조합으로 최적 배정</span>
+    <>
+      {/* HERO */}
+      <div className={`screen ${view === "hero" ? "active" : "hidden"}`}>
+        <div className="hero-bg" ref={heroBgRef} />
+        <div className="hero-grain" />
+        <div className="hero-vignette" />
+
+        <nav className="hero-nav">
+          <div className="hero-nav-col">
+            {restaurants.map(r => (
+              <button key={r.id} className="nav-link" onClick={() => { setSelectedRestaurantId(String(r.id)); openBooking(); }}>
+                {r.name}
+              </button>
+            ))}
+            <button className="nav-link" onClick={openWaitlist}>대기 등록</button>
+          </div>
+          <div className="hero-nav-col right">
+            <button className="nav-link" onClick={openBooking}>예약</button>
+            <a className="nav-link" href="/admin">관리자</a>
+          </div>
+        </nav>
+
+        <div className="hero-content">
+          <div className="hero-eyebrow">파인다이닝 · 레스토랑 예약 시스템</div>
+          <div className="hero-title">
+            Smart<br /><em>Booking</em>
+          </div>
+          <div className="hero-bottom">
+            <div className="hero-desc">
+              테이블 단위 배정, 보증금 결제, 취소 발생 시 대기자 순차 알림까지 하나의 흐름으로 연결된 예약 경험.
             </div>
-            <div className="hero-point">
-              <strong>대기열 엔진</strong>
-              <span>취소가 생기면 조건에 맞는 손님에게 순차 오퍼</span>
-            </div>
-            <div className="hero-point">
-              <strong>클레임 + 결제</strong>
-              <span>TTL 안에 수락과 보증금 결제가 끝나야 확정</span>
+            <div className="hero-cta">
+              <button className="btn-ghost-light secondary" onClick={openWaitlist}>대기 등록</button>
+              <button className="btn-ghost-light" onClick={openBooking}>예약하기</button>
             </div>
           </div>
         </div>
-        <aside className="hero-card hero-side">
-          <h3>Demo 안내</h3>
-          <ul>
-            <li>기본 식당 Mosu Seoul과 샘플 슬롯이 자동 생성됩니다.</li>
-            <li>SMTP가 없으면 이메일은 서버 콘솔에 출력됩니다.</li>
-            <li>관리자 화면에서 예약 취소를 누르면 대기열 엔진이 바로 작동합니다.</li>
-          </ul>
-        </aside>
-      </section>
+      </div>
 
-      <div className="grid two">
-        <section className="panel">
-          <h3>손님 예약</h3>
-          <p>원하는 슬롯을 선택하고 보증금 결제로 예약을 확정하세요.</p>
-          <Message message={message} />
-          <form onSubmit={submitReservation}>
-            <div className="form-grid">
-              <label className="field full">
-                <span>식당</span>
-                <select
-                  value={selectedRestaurantId}
-                  onChange={(event) => {
-                    setSelectedRestaurantId(event.target.value);
-                    setMessage(null);
-                    setWaitMessage(null);
-                    setReservationForm((current) => ({ ...current, slot_id: "" }));
-                  }}
-                >
-                  {restaurants.map((restaurant) => (
-                    <option key={restaurant.id} value={restaurant.id}>
-                      {restaurant.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field full">
-                <span>슬롯</span>
-                <select
-                  value={reservationForm.slot_id}
-                  onChange={(event) => updateReservationField("slot_id", event.target.value)}
-                >
-                  {slots.map((slot) => (
-                    <option key={slot.id} value={slot.id}>
-                      {slot.day} {formatTime(slot.time)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                <span>인원</span>
-                <input
-                  type="number"
-                  min="1"
-                  max="20"
-                  value={reservationForm.party_size}
-                  onChange={(event) => updateReservationField("party_size", event.target.value)}
-                />
-              </label>
-              <label className="field">
-                <span>이름</span>
-                <input
-                  value={reservationForm.guest_name}
-                  onChange={(event) => updateReservationField("guest_name", event.target.value)}
-                />
-              </label>
-              <label className="field">
-                <span>휴대폰 번호</span>
-                <input
-                  value={reservationForm.phone_number}
-                  onChange={(event) => updateReservationField("phone_number", event.target.value)}
-                  placeholder="01012345678"
-                />
-              </label>
-              <label className="field full">
-                <span>이메일</span>
-                <input
-                  type="email"
-                  value={reservationForm.guest_email}
-                  onChange={(event) => updateReservationField("guest_email", event.target.value)}
-                />
-              </label>
-              <div className="field full">
-                <VerificationBox
-                  prefix="reservation"
-                  email={reservationForm.guest_email}
-                  verificationState={reservationVerification}
-                  onCodeChange={(value) =>
-                    setReservationVerification((current) => ({ ...current, code: value }))
-                  }
-                  onRequestCode={() =>
-                    requestEmailVerification(reservationForm.guest_email, setReservationVerification)
-                  }
-                  onConfirmCode={() =>
-                    confirmEmailVerification(
-                      reservationForm.guest_email,
-                      reservationVerification,
-                      setReservationVerification,
-                    )
-                  }
-                />
+      {/* SUCCESS */}
+      <div className={`screen success-screen ${view === "success" ? "active" : "hidden"}`}>
+        <div className="success-ornament">
+          <div className="success-ring"><span className="success-ring-inner">✦</span></div>
+          <div className="success-badge">RESERVATION CONFIRMED</div>
+        </div>
+        <div className="success-title">예약 완료</div>
+        <div className="success-sub">소중한 식사 시간을 기대하겠습니다</div>
+        {booking && (
+          <div className="success-card">
+            {[
+              ["레스토랑", booking.restaurant],
+              ["날짜", fmtDate(booking.day)],
+              ["시간", booking.time],
+              ["인원", `${booking.party}명`],
+              ["예약금", `${booking.deposit.toLocaleString()}원`],
+            ].map(([l, v]) => (
+              <div key={l} className="success-row">
+                <span className="success-row-lbl">{l}</span>
+                <span className="success-row-val">{v}</span>
               </div>
-            </div>
-            <div className="button-row">
-              <button className="btn primary" type="submit">
-                결제 단계로 이동
-              </button>
-            </div>
-          </form>
+            ))}
+          </div>
+        )}
+        <button className="success-back-btn" onClick={() => setView("hero")}>홈으로 돌아가기</button>
+      </div>
 
-          <div className="cards spacing-top">
-            {slotGroups.length ? (
-              slotGroups.map(([day, daySlots]) => (
-                <div className="mini-card" key={day}>
-                  <p className="eyebrow">{selectedRestaurant?.name || "Restaurant"}</p>
-                  <div className="card-head">
-                    <strong>{day}</strong>
-                    <span className="muted">{daySlots.length} slots</span>
+      {/* BOOKING / WAITLIST MODAL */}
+      <div className={`modal-backdrop ${modal ? "" : "hidden"}`} onClick={e => { if (e.target === e.currentTarget) closeModal(); }}>
+        <div className="modal">
+
+          {/* BOOKING STEPS */}
+          {(modal === "booking" || modal === "guest" || modal === "deposit") && (
+            <>
+              <div className="modal-head">
+                <button className="modal-close" onClick={closeModal}>×</button>
+                <div className="modal-step-label">{STEP_LABELS[modal]}</div>
+                <div className="modal-title">{STEP_TITLES[modal]}</div>
+                <div className="modal-progress">
+                  {[1, 2, 3].map(n => (
+                    <div key={n} className={`modal-prog-seg ${STEP_NUM[modal] >= n ? "done" : ""}`} />
+                  ))}
+                </div>
+              </div>
+
+              <div className="modal-body">
+                {/* STEP 1: slot + party */}
+                {modal === "booking" && (
+                  <>
+                    {restaurants.length > 1 && (
+                      <div style={{ marginBottom: 24 }}>
+                        <span className="sel-label">식당</span>
+                        <select className="luxury-select" value={selectedRestaurantId}
+                          onChange={e => setSelectedRestaurantId(e.target.value)}>
+                          {restaurants.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                        </select>
+                      </div>
+                    )}
+
+                    <span className="sel-label">날짜 선택</span>
+                    <div className="slot-date-grid">
+                      {slotGroups.map(([day]) => (
+                        <div key={day} className={`date-chip ${selDay === day ? "sel" : ""}`}
+                          onClick={() => { setSelDay(day); setSelSlotId(slots.find(s => s.day === day)?.id || null); }}>
+                          <span className="dc-day">{fmtDate(day).slice(0, 5)}</span>
+                          {day.slice(8)}
+                        </div>
+                      ))}
+                    </div>
+
+                    {selDay && (
+                      <>
+                        <span className="sel-label">시간 선택</span>
+                        <div className="time-chips">
+                          {timeSlotsForDay.map(slot => (
+                            <div key={slot.id} className={`time-chip ${selSlotId === slot.id ? "sel" : ""}`}
+                              onClick={() => setSelSlotId(slot.id)}>
+                              {formatTime(slot.time)}
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
+
+                    <span className="sel-label">인원</span>
+                    <div className="party-chips">
+                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => (
+                        <div key={n} className={`party-chip ${selParty === n ? "sel" : ""}`}
+                          onClick={() => setSelParty(n)}>{n}명</div>
+                      ))}
+                    </div>
+                  </>
+                )}
+
+                {/* STEP 2: guest info + email verification */}
+                {modal === "guest" && (
+                  <>
+                    <div className="info-fields">
+                      <div className="info-field">
+                        <label>이름</label>
+                        <input value={guestName} onChange={e => setGuestName(e.target.value)} placeholder="홍길동" />
+                      </div>
+                      <div className="info-field">
+                        <label>휴대폰 번호</label>
+                        <input value={guestPhone} onChange={e => setGuestPhone(e.target.value)} placeholder="01012345678" />
+                      </div>
+                      <div className="info-field full">
+                        <label>이메일</label>
+                        <input type="email" value={guestEmail}
+                          onChange={e => {
+                            setGuestEmail(e.target.value);
+                            if (verifiedEmail && verifiedEmail !== normalizeEmail(e.target.value)) {
+                              setVerifiedEmail(""); setVerMsg(null);
+                            }
+                          }}
+                          placeholder="name@example.com" />
+                      </div>
+                      <div className="info-field full">
+                        <label>인증번호</label>
+                        <div className="verify-row">
+                          <div className="info-field" style={{ margin: 0 }}>
+                            <input
+                              id="reservation-verification-code"
+                              value={verCode} onChange={e => setVerCode(e.target.value)}
+                              placeholder="6자리 코드" />
+                          </div>
+                          <button className="verify-btn" type="button"
+                            id="reservation-send-code"
+                            onClick={() => requestCode(guestEmail, setVerMsg)}>코드 보내기</button>
+                          <button className="verify-btn" type="button"
+                            id="reservation-verify-code"
+                            onClick={() => confirmCode(guestEmail, verCode, setVerifiedEmail, setVerMsg)}>코드 확인</button>
+                        </div>
+                        {verMsg && <div className={`verify-msg ${verMsg.kind}`}>{verMsg.text}</div>}
+                        <div className={`verify-badge ${verifiedEmail && verifiedEmail === normalizeEmail(guestEmail) ? "done" : "pending"}`}
+                          style={{ marginTop: 8, width: "fit-content" }}>
+                          {verifiedEmail && verifiedEmail === normalizeEmail(guestEmail) ? "인증 완료" : "인증 필요"}
+                        </div>
+                      </div>
+                    </div>
+                    {modalMsg && <div className={`verify-msg ${modalMsg.kind}`} style={{ marginTop: 16 }}>{modalMsg.text}</div>}
+                  </>
+                )}
+
+                {/* STEP 3: deposit */}
+                {modal === "deposit" && (
+                  <>
+                    <div className="confirm-card">
+                      <div className="confirm-rest-name">{selectedRestaurant?.name}</div>
+                      <div className="confirm-rest-sub">파인다이닝 예약</div>
+                      <div className="confirm-details">
+                        <div className="confirm-detail">
+                          <div className="confirm-detail-icon">📅</div>
+                          <div className="confirm-detail-val">{fmtDate(selDay)}</div>
+                        </div>
+                        <div className="confirm-detail">
+                          <div className="confirm-detail-icon">🕐</div>
+                          <div className="confirm-detail-val">{selectedSlot ? formatTime(selectedSlot.time) : "—"}</div>
+                        </div>
+                        <div className="confirm-detail">
+                          <div className="confirm-detail-icon">👤</div>
+                          <div className="confirm-detail-val">{selParty}명</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="deposit-notice">
+                      <span>ℹ</span>
+                      <span>인원에 따른 예약 보증금이 발생합니다. 결제 후 예약이 확정됩니다.</span>
+                    </div>
+                    <table className="deposit-table">
+                      <tbody>
+                        <tr><td>1인당 예약금</td><td>{DEPOSIT_PER_PERSON.toLocaleString()}원</td></tr>
+                        <tr><td>× 총 예약 인원</td><td>{selParty}명</td></tr>
+                        <tr><td>합계</td><td>{deposit.toLocaleString()}원</td></tr>
+                      </tbody>
+                    </table>
+                    <div className="refund-box">
+                      <strong>환불정책</strong>
+                      · 노쇼 시: 환불 불가<br />
+                      · 당일 취소: 환불 불가<br />
+                      · 1일 전 취소: 50% 환불<br />
+                      · 2일 전 이상: 100% 환불
+                    </div>
+                    {modalMsg && <div className={`verify-msg ${modalMsg.kind}`} style={{ marginTop: 16 }}>{modalMsg.text}</div>}
+                  </>
+                )}
+              </div>
+
+              <div className="modal-foot">
+                {modal === "booking" && (
+                  <>
+                    <button className="modal-back-btn" onClick={closeModal}>닫기</button>
+                    <button className="modal-next-btn" disabled={!canStep1} onClick={() => setModal("guest")}>다음</button>
+                  </>
+                )}
+                {modal === "guest" && (
+                  <>
+                    <button className="modal-back-btn" onClick={() => setModal("booking")}>이전</button>
+                    <button className="modal-next-btn" disabled={!canStep2} onClick={() => { setModalMsg(null); setModal("deposit"); }}>다음</button>
+                  </>
+                )}
+                {modal === "deposit" && (
+                  <>
+                    <button className="modal-back-btn" onClick={() => setModal("guest")}>이전</button>
+                    <button className="modal-next-btn gold" onClick={submitReservation}>결제하기</button>
+                  </>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* WAITLIST MODAL */}
+          {modal === "waitlist" && (
+            <>
+              <div className="modal-head">
+                <button className="modal-close" onClick={closeModal}>×</button>
+                <div className="modal-step-label">대기 등록</div>
+                <div className="modal-title">대기열에 등록하기</div>
+              </div>
+              <div className="modal-body">
+                <div className="info-fields">
+                  {restaurants.length > 1 && (
+                    <div className="info-field full">
+                      <label>식당</label>
+                      <select className="luxury-select" value={selectedRestaurantId}
+                        onChange={e => setSelectedRestaurantId(e.target.value)}>
+                        {restaurants.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  <div className="info-field">
+                    <label>날짜</label>
+                    <input type="date" value={waitDay} onChange={e => setWaitDay(e.target.value)} />
                   </div>
-                  <div className="button-row">
-                    {daySlots.map((slot) => (
-                      <span className="pill" key={slot.id}>
-                        {formatTime(slot.time)}
-                      </span>
-                    ))}
+                  <div className="info-field">
+                    <label>인원</label>
+                    <input type="number" min="1" max="20" value={waitParty} onChange={e => setWaitParty(Number(e.target.value))} />
+                  </div>
+                  <div className="info-field">
+                    <label>희망 시작 시간</label>
+                    <input type="time" value={waitTimeStart} onChange={e => setWaitTimeStart(e.target.value)} />
+                  </div>
+                  <div className="info-field">
+                    <label>희망 마감 시간</label>
+                    <input type="time" value={waitTimeEnd} onChange={e => setWaitTimeEnd(e.target.value)} />
+                  </div>
+                  <div className="info-field">
+                    <label>이름</label>
+                    <input value={waitName} onChange={e => setWaitName(e.target.value)} placeholder="홍길동" />
+                  </div>
+                  <div className="info-field">
+                    <label>휴대폰 번호</label>
+                    <input value={waitPhone} onChange={e => setWaitPhone(e.target.value)} placeholder="01012345678" />
+                  </div>
+                  <div className="info-field full">
+                    <label>이메일</label>
+                    <input type="email" value={waitEmail}
+                      onChange={e => {
+                        setWaitEmail(e.target.value);
+                        if (waitVerifiedEmail && waitVerifiedEmail !== normalizeEmail(e.target.value)) {
+                          setWaitVerifiedEmail(""); setWaitVerMsg(null);
+                        }
+                      }}
+                      placeholder="name@example.com" />
+                  </div>
+                  <div className="info-field full">
+                    <label>인증번호</label>
+                    <div className="verify-row">
+                      <div className="info-field" style={{ margin: 0 }}>
+                        <input value={waitVerCode} onChange={e => setWaitVerCode(e.target.value)} placeholder="6자리 코드" />
+                      </div>
+                      <button className="verify-btn" type="button" onClick={() => requestCode(waitEmail, setWaitVerMsg)}>코드 보내기</button>
+                      <button className="verify-btn" type="button" onClick={() => confirmCode(waitEmail, waitVerCode, setWaitVerifiedEmail, setWaitVerMsg)}>코드 확인</button>
+                    </div>
+                    {waitVerMsg && <div className={`verify-msg ${waitVerMsg.kind}`}>{waitVerMsg.text}</div>}
+                    <div className={`verify-badge ${waitVerifiedEmail && waitVerifiedEmail === normalizeEmail(waitEmail) ? "done" : "pending"}`}
+                      style={{ marginTop: 8, width: "fit-content" }}>
+                      {waitVerifiedEmail && waitVerifiedEmail === normalizeEmail(waitEmail) ? "인증 완료" : "인증 필요"}
+                    </div>
+                  </div>
+                  <div className="info-field full">
+                    <label>메모 (선택)</label>
+                    <textarea value={waitNotes} onChange={e => setWaitNotes(e.target.value)}
+                      placeholder="예: 창가 선호, 10분 전후 가능" rows={3} />
                   </div>
                 </div>
-              ))
-            ) : (
-              <div className="empty">현재 공개된 슬롯이 없습니다.</div>
-            )}
-          </div>
-        </section>
-
-        <section className="panel">
-          <h3>대기 등록</h3>
-          <p>원하는 날짜와 시간 범위를 남겨두면 취소 발생 시 이메일 오퍼를 받을 수 있어요.</p>
-          <Message message={waitMessage} />
-          <form onSubmit={submitWaitlist}>
-            <div className="form-grid">
-              <label className="field full">
-                <span>식당</span>
-                <select
-                  value={selectedRestaurantId}
-                  onChange={(event) => {
-                    setSelectedRestaurantId(event.target.value);
-                    setMessage(null);
-                    setWaitMessage(null);
-                    setReservationForm((current) => ({ ...current, slot_id: "" }));
-                  }}
-                >
-                  {restaurants.map((restaurant) => (
-                    <option key={restaurant.id} value={restaurant.id}>
-                      {restaurant.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                <span>날짜</span>
-                <input
-                  type="date"
-                  value={waitlistForm.day}
-                  onChange={(event) => updateWaitlistField("day", event.target.value)}
-                />
-              </label>
-              <label className="field">
-                <span>인원</span>
-                <input
-                  type="number"
-                  min="1"
-                  max="20"
-                  value={waitlistForm.party_size}
-                  onChange={(event) => updateWaitlistField("party_size", event.target.value)}
-                />
-              </label>
-              <label className="field">
-                <span>희망 시작 시간</span>
-                <input
-                  type="time"
-                  value={waitlistForm.time_start}
-                  onChange={(event) => updateWaitlistField("time_start", event.target.value)}
-                />
-              </label>
-              <label className="field">
-                <span>희망 마감 시간</span>
-                <input
-                  type="time"
-                  value={waitlistForm.time_end}
-                  onChange={(event) => updateWaitlistField("time_end", event.target.value)}
-                />
-              </label>
-              <label className="field">
-                <span>이름</span>
-                <input
-                  value={waitlistForm.guest_name}
-                  onChange={(event) => updateWaitlistField("guest_name", event.target.value)}
-                />
-              </label>
-              <label className="field">
-                <span>휴대폰 번호</span>
-                <input
-                  value={waitlistForm.phone_number}
-                  onChange={(event) => updateWaitlistField("phone_number", event.target.value)}
-                  placeholder="01012345678"
-                />
-              </label>
-              <label className="field">
-                <span>이메일</span>
-                <input
-                  type="email"
-                  value={waitlistForm.guest_email}
-                  onChange={(event) => updateWaitlistField("guest_email", event.target.value)}
-                />
-              </label>
-              <div className="field full">
-                <VerificationBox
-                  prefix="waitlist"
-                  email={waitlistForm.guest_email}
-                  verificationState={waitlistVerification}
-                  onCodeChange={(value) =>
-                    setWaitlistVerification((current) => ({ ...current, code: value }))
-                  }
-                  onRequestCode={() =>
-                    requestEmailVerification(waitlistForm.guest_email, setWaitlistVerification)
-                  }
-                  onConfirmCode={() =>
-                    confirmEmailVerification(
-                      waitlistForm.guest_email,
-                      waitlistVerification,
-                      setWaitlistVerification,
-                    )
-                  }
-                />
+                {waitMsg && <div className={`verify-msg ${waitMsg.kind}`} style={{ marginTop: 16 }}>{waitMsg.text}</div>}
               </div>
-              <label className="field full">
-                <span>메모</span>
-                <textarea
-                  value={waitlistForm.notes}
-                  onChange={(event) => updateWaitlistField("notes", event.target.value)}
-                  placeholder="예: 창가 선호, 10분 전후 가능"
-                />
-              </label>
-            </div>
-            <div className="button-row">
-              <button className="btn primary" type="submit">
-                대기열 등록
-              </button>
-            </div>
-          </form>
-        </section>
+              <div className="modal-foot">
+                <button className="modal-back-btn" onClick={closeModal}>닫기</button>
+                <button className="modal-next-btn" onClick={submitWaitlist}>대기열 등록</button>
+              </div>
+            </>
+          )}
+
+        </div>
       </div>
-    </Layout>
+    </>
   );
 }
 
+// ── CLAIM PAGE ──────────────────────────────────────────────
 function ClaimPage({ token }) {
   const [claim, setClaim] = useState(null);
   const [message, setMessage] = useState(null);
@@ -692,28 +595,11 @@ function ClaimPage({ token }) {
 
   useEffect(() => {
     let active = true;
-    async function loadClaim() {
-      setLoading(true);
-      try {
-        const data = await apiFetch(`/api/public/claims/${token}`);
-        if (active) {
-          setClaim(data);
-        }
-      } catch (error) {
-        if (active) {
-          setMessage({ kind: "error", text: error.message });
-        }
-      } finally {
-        if (active) {
-          setLoading(false);
-        }
-      }
-    }
-
-    loadClaim();
-    return () => {
-      active = false;
-    };
+    apiFetch(`/api/public/claims/${token}`)
+      .then(data => { if (active) setClaim(data); })
+      .catch(e => { if (active) setMessage({ kind: "error", text: e.message }); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
   }, [token]);
 
   async function acceptClaim() {
@@ -721,52 +607,56 @@ function ClaimPage({ token }) {
     try {
       const result = await apiFetch(`/api/public/claims/${token}/accept`, { method: "POST" });
       window.location.href = `/pay/${result.payment_token}`;
-    } catch (error) {
-      setMessage({ kind: "error", text: error.message });
-    }
+    } catch (e) { setMessage({ kind: "error", text: e.message }); }
   }
 
   return (
-    <Layout>
-      <section className="panel narrow-panel">
-        <h3>대기 오퍼 수락</h3>
-        <Message message={message} />
+    <div className="luxury-page">
+      <nav className="luxury-page-nav">
+        <span className="luxury-brand">Smart Booking</span>
+        <a href="/" style={{ fontFamily: "'Cormorant SC', serif", fontSize: 11, letterSpacing: "0.2em", color: "var(--sepia-mid)" }}>← 홈</a>
+      </nav>
+      <div className="luxury-page-body">
+        <div className="luxury-page-title">대기 오퍼 수락</div>
+        <div className="luxury-page-sub">Waitlist Offer</div>
+        {message && <div className={`luxury-msg ${message.kind}`}>{message.text}</div>}
         {loading ? (
-          <div className="empty">오퍼 정보를 불러오는 중입니다...</div>
+          <div style={{ fontFamily: "'Cormorant Garamond', serif", color: "var(--sepia-light)", fontSize: 18 }}>불러오는 중...</div>
         ) : claim ? (
           <>
-            <p>오퍼를 수락하면 보증금 결제 단계로 이동하고, 결제가 끝나면 예약이 확정됩니다.</p>
-            <div className="mini-card">
-              <p className="eyebrow">{claim.restaurant_name}</p>
-              <h4>
-                {claim.day} {formatTime(claim.time)}
-              </h4>
-              <div className="button-row">
-                <StatusBadge status={claim.status} />
-                <span className="pill">{claim.party_size}명</span>
-                <span className="pill">만료 {claim.expires_at.replace("T", " ").slice(0, 16)} UTC</span>
-              </div>
+            <div className="luxury-info-card">
+              {[
+                ["레스토랑", claim.restaurant_name],
+                ["날짜", claim.day],
+                ["시간", formatTime(claim.time)],
+                ["인원", `${claim.party_size}명`],
+                ["상태", claim.status],
+                ["만료", claim.expires_at.replace("T", " ").slice(0, 16) + " UTC"],
+              ].map(([l, v]) => (
+                <div key={l} className="luxury-info-row">
+                  <span className="luxury-info-lbl">{l}</span>
+                  <span className="luxury-info-val">{v}</span>
+                </div>
+              ))}
             </div>
-            <div className="button-row">
-              {claim.status === "active" ? (
-                <button className="btn primary" type="button" onClick={acceptClaim}>
-                  오퍼 수락 후 결제
-                </button>
-              ) : (
-                <a className="btn primary" href="/">
-                  홈으로
-                </a>
-              )}
-            </div>
+            <p style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 15, color: "var(--sepia-mid)", lineHeight: 1.7, marginBottom: 24 }}>
+              오퍼를 수락하면 보증금 결제 단계로 이동합니다. 결제가 완료되면 예약이 확정됩니다.
+            </p>
+            {claim.status === "active" ? (
+              <button className="luxury-action-btn gold" onClick={acceptClaim}>오퍼 수락 후 결제</button>
+            ) : (
+              <a className="luxury-secondary-btn" href="/">홈으로 돌아가기</a>
+            )}
           </>
         ) : (
-          <div className="empty">오퍼 정보를 찾지 못했습니다.</div>
+          <div style={{ fontFamily: "'Cormorant Garamond', serif", color: "var(--sepia-light)", fontSize: 18 }}>오퍼 정보를 찾지 못했습니다.</div>
         )}
-      </section>
-    </Layout>
+      </div>
+    </div>
   );
 }
 
+// ── PAYMENT PAGE ────────────────────────────────────────────
 function PaymentPage({ token }) {
   const [payment, setPayment] = useState(null);
   const [message, setMessage] = useState(null);
@@ -774,815 +664,347 @@ function PaymentPage({ token }) {
 
   useEffect(() => {
     let active = true;
-    async function loadPayment() {
-      setLoading(true);
-      try {
-        const data = await apiFetch(`/api/public/payments/${token}`);
-        if (active) {
-          setPayment(data);
-        }
-      } catch (error) {
-        if (active) {
-          setMessage({ kind: "error", text: error.message });
-        }
-      } finally {
-        if (active) {
-          setLoading(false);
-        }
-      }
-    }
-
-    loadPayment();
-    return () => {
-      active = false;
-    };
+    apiFetch(`/api/public/payments/${token}`)
+      .then(data => { if (active) setPayment(data); })
+      .catch(e => { if (active) setMessage({ kind: "error", text: e.message }); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
   }, [token]);
 
   async function completePayment() {
     setMessage(null);
     try {
       await apiFetch(`/api/public/payments/${token}/complete`, { method: "POST" });
-      setMessage({ kind: "info", text: "결제가 완료되어 예약이 확정됐습니다." });
       const data = await apiFetch(`/api/public/payments/${token}`);
       setPayment(data);
-    } catch (error) {
-      setMessage({ kind: "error", text: error.message });
-    }
+      setMessage({ kind: "info", text: "결제가 완료되어 예약이 확정됐습니다." });
+    } catch (e) { setMessage({ kind: "error", text: e.message }); }
   }
 
   return (
-    <Layout>
-      <section className="panel narrow-panel">
-        <h3>보증금 결제</h3>
-        <Message message={message} />
+    <div className="luxury-page">
+      <nav className="luxury-page-nav">
+        <span className="luxury-brand">Smart Booking</span>
+        <a href="/" style={{ fontFamily: "'Cormorant SC', serif", fontSize: 11, letterSpacing: "0.2em", color: "var(--sepia-mid)" }}>← 홈</a>
+      </nav>
+      <div className="luxury-page-body">
+        <div className="luxury-page-title">보증금 결제</div>
+        <div className="luxury-page-sub">Deposit Payment</div>
+        {message && <div className={`luxury-msg ${message.kind}`}>{message.text}</div>}
         {loading ? (
-          <div className="empty">결제 정보를 불러오는 중입니다...</div>
+          <div style={{ fontFamily: "'Cormorant Garamond', serif", color: "var(--sepia-light)", fontSize: 18 }}>불러오는 중...</div>
         ) : payment ? (
           <>
-            <div className="mini-card">
-              <p className="eyebrow">Reservation #{payment.reservation_id}</p>
-              <h4>{Number(payment.amount).toLocaleString()} KRW</h4>
-              <div className="button-row">
-                <StatusBadge status={payment.status} />
-                <span className="pill">테이블 {(payment.tables || []).join(", ") || "-"}</span>
-              </div>
-              <p className="muted">
-                결제 만료 시간: {payment.expires_at.replace("T", " ").slice(0, 16)} UTC
-              </p>
+            <div className="luxury-info-card">
+              {[
+                ["예약 번호", `#${payment.reservation_id}`],
+                ["결제 금액", `${Number(payment.amount).toLocaleString()} KRW`],
+                ["테이블", (payment.tables || []).join(", ") || "-"],
+                ["상태", payment.status],
+                ["결제 만료", payment.expires_at.replace("T", " ").slice(0, 16) + " UTC"],
+              ].map(([l, v]) => (
+                <div key={l} className="luxury-info-row">
+                  <span className="luxury-info-lbl">{l}</span>
+                  <span className="luxury-info-val">{v}</span>
+                </div>
+              ))}
             </div>
-            <div className="button-row">
-              {payment.status === "pending" ? (
-                <button className="btn primary" type="button" onClick={completePayment}>
-                  지금 결제하기
-                </button>
-              ) : (
-                <a className="btn primary" href="/">
-                  홈으로
-                </a>
-              )}
-            </div>
+            {payment.status === "pending" ? (
+              <button className="luxury-action-btn gold" onClick={completePayment}>지금 결제하기</button>
+            ) : (
+              <a className="luxury-secondary-btn" href="/">홈으로 돌아가기</a>
+            )}
           </>
         ) : (
-          <div className="empty">결제 정보를 찾지 못했습니다.</div>
+          <div style={{ fontFamily: "'Cormorant Garamond', serif", color: "var(--sepia-light)", fontSize: 18 }}>결제 정보를 찾지 못했습니다.</div>
         )}
-      </section>
-    </Layout>
+      </div>
+    </div>
   );
 }
 
+// ── ADMIN PAGE ──────────────────────────────────────────────
 function AdminPage() {
   const [token, setToken] = useState(() => window.localStorage.getItem(ADMIN_KEY) || "");
   const [dashboard, setDashboard] = useState(null);
   const [message, setMessage] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [restaurantForm, setRestaurantForm] = useState({
-    name: "",
-    description: "",
-    contact_email: "",
-  });
-  const [tableForm, setTableForm] = useState({
-    restaurant_id: "",
-    name: "",
-    capacity: "2",
-    combinable_group: "",
-  });
-  const [slotForm, setSlotForm] = useState({
-    restaurant_id: "",
-    day: "",
-    time: "18:00",
-  });
-  const [openSlotForm, setOpenSlotForm] = useState({
-    slot_id: "",
-    party_size_cap: "2",
-  });
+  const [restaurantForm, setRestaurantForm] = useState({ name: "", description: "", contact_email: "" });
+  const [tableForm, setTableForm] = useState({ restaurant_id: "", name: "", capacity: "2", combinable_group: "" });
+  const [slotForm, setSlotForm] = useState({ restaurant_id: "", day: "", time: "18:00" });
+  const [openSlotForm, setOpenSlotForm] = useState({ slot_id: "", party_size_cap: "2" });
 
   useEffect(() => {
-    if (!token) {
-      return;
-    }
-
+    if (!token) return;
     let active = true;
-    async function loadDashboard() {
-      setLoading(true);
-      try {
-        const data = await apiFetch("/api/admin/dashboard", {}, token);
-        if (!active) {
-          return;
-        }
+    setLoading(true);
+    apiFetch("/api/admin/dashboard", {}, token)
+      .then(data => {
+        if (!active) return;
         setDashboard(data);
-        setTableForm((current) => ({
-          ...current,
-          restaurant_id: current.restaurant_id || String(data.restaurants[0]?.id || ""),
-        }));
-        setSlotForm((current) => ({
-          ...current,
-          restaurant_id: current.restaurant_id || String(data.restaurants[0]?.id || ""),
-        }));
-        setOpenSlotForm((current) => ({
-          ...current,
-          slot_id: current.slot_id || String(data.slots[0]?.slot_id || ""),
-        }));
-      } catch (error) {
-        if (!active) {
-          return;
-        }
-        setMessage({ kind: "error", text: error.message });
-        if (error.message === "Invalid admin token") {
-          window.localStorage.removeItem(ADMIN_KEY);
-          setToken("");
-          setDashboard(null);
-        }
-      } finally {
-        if (active) {
-          setLoading(false);
-        }
-      }
-    }
-
-    loadDashboard();
-    return () => {
-      active = false;
-    };
+        setMessage(null);
+        setTableForm(c => ({ ...c, restaurant_id: c.restaurant_id || String(data.restaurants[0]?.id || "") }));
+        setSlotForm(c => ({ ...c, restaurant_id: c.restaurant_id || String(data.restaurants[0]?.id || "") }));
+        setOpenSlotForm(c => ({ ...c, slot_id: c.slot_id || String(data.slots[0]?.slot_id || "") }));
+      })
+      .catch(e => {
+        if (!active) return;
+        setMessage({ kind: "error", text: e.message });
+        if (e.message === "Invalid admin token") { window.localStorage.removeItem(ADMIN_KEY); setToken(""); setDashboard(null); }
+      })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
   }, [token]);
 
-  async function refreshDashboard(nextMessage = null) {
-    if (!token) {
-      return;
-    }
+  async function refresh(msg) {
+    if (!token) return;
     setLoading(true);
     try {
       const data = await apiFetch("/api/admin/dashboard", {}, token);
       setDashboard(data);
-      if (nextMessage) {
-        setMessage(nextMessage);
-      }
-    } catch (error) {
-      setMessage({ kind: "error", text: error.message });
-    } finally {
-      setLoading(false);
-    }
+      if (msg) setMessage(msg);
+    } catch (e) { setMessage({ kind: "error", text: e.message }); }
+    finally { setLoading(false); }
   }
 
-  async function submitAdminLogin(event) {
-    event.preventDefault();
-    setMessage(null);
+  async function login(e) {
+    e.preventDefault(); setMessage(null);
     try {
-      await apiFetch("/api/admin/session", {
-        method: "POST",
-        body: JSON.stringify({ token }),
-      });
+      await apiFetch("/api/admin/session", { method: "POST", body: JSON.stringify({ token }) });
       window.localStorage.setItem(ADMIN_KEY, token);
-      await refreshDashboard({ kind: "info", text: "관리자 로그인에 성공했습니다." });
-    } catch (error) {
-      setMessage({ kind: "error", text: error.message });
-    }
+      await refresh({ kind: "info", text: "로그인 성공." });
+    } catch (err) { setMessage({ kind: "error", text: err.message }); }
   }
 
-  function logout() {
-    window.localStorage.removeItem(ADMIN_KEY);
-    setToken("");
-    setDashboard(null);
-    setMessage(null);
-  }
+  function logout() { window.localStorage.removeItem(ADMIN_KEY); setToken(""); setDashboard(null); setMessage(null); }
 
-  async function submitRestaurant(event) {
-    event.preventDefault();
-    try {
-      await apiFetch(
-        "/api/admin/restaurants",
-        {
-          method: "POST",
-          body: JSON.stringify(restaurantForm),
-        },
-        token,
-      );
-      setRestaurantForm({ name: "", description: "", contact_email: "" });
-      await refreshDashboard({ kind: "info", text: "식당을 추가했습니다." });
-    } catch (error) {
-      setMessage({ kind: "error", text: error.message });
-    }
+  async function submitRestaurant(e) {
+    e.preventDefault();
+    try { await apiFetch("/api/admin/restaurants", { method: "POST", body: JSON.stringify(restaurantForm) }, token); setRestaurantForm({ name: "", description: "", contact_email: "" }); await refresh({ kind: "info", text: "식당 추가 완료." }); }
+    catch (err) { setMessage({ kind: "error", text: err.message }); }
   }
-
-  async function submitTable(event) {
-    event.preventDefault();
-    try {
-      await apiFetch(
-        `/api/admin/restaurants/${tableForm.restaurant_id}/tables`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            name: tableForm.name,
-            capacity: Number(tableForm.capacity),
-            combinable_group: tableForm.combinable_group || null,
-          }),
-        },
-        token,
-      );
-      setTableForm((current) => ({
-        ...current,
-        name: "",
-        capacity: "2",
-        combinable_group: "",
-      }));
-      await refreshDashboard({ kind: "info", text: "테이블을 추가했습니다." });
-    } catch (error) {
-      setMessage({ kind: "error", text: error.message });
-    }
+  async function submitTable(e) {
+    e.preventDefault();
+    try { await apiFetch(`/api/admin/restaurants/${tableForm.restaurant_id}/tables`, { method: "POST", body: JSON.stringify({ name: tableForm.name, capacity: Number(tableForm.capacity), combinable_group: tableForm.combinable_group || null }) }, token); setTableForm(c => ({ ...c, name: "", capacity: "2", combinable_group: "" })); await refresh({ kind: "info", text: "테이블 추가 완료." }); }
+    catch (err) { setMessage({ kind: "error", text: err.message }); }
   }
-
-  async function submitSlot(event) {
-    event.preventDefault();
-    try {
-      await apiFetch(
-        `/api/admin/restaurants/${slotForm.restaurant_id}/slots`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            day: slotForm.day,
-            time: `${slotForm.time}:00`,
-            is_open: true,
-          }),
-        },
-        token,
-      );
-      await refreshDashboard({ kind: "info", text: "슬롯을 생성했습니다." });
-    } catch (error) {
-      setMessage({ kind: "error", text: error.message });
-    }
+  async function submitSlot(e) {
+    e.preventDefault();
+    try { await apiFetch(`/api/admin/restaurants/${slotForm.restaurant_id}/slots`, { method: "POST", body: JSON.stringify({ day: slotForm.day, time: `${slotForm.time}:00`, is_open: true }) }, token); await refresh({ kind: "info", text: "슬롯 생성 완료." }); }
+    catch (err) { setMessage({ kind: "error", text: err.message }); }
   }
-
-  async function submitOpenSlot(event) {
-    event.preventDefault();
-    try {
-      await apiFetch(
-        "/api/admin/open-slots",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            slot_id: Number(openSlotForm.slot_id),
-            party_size_cap: Number(openSlotForm.party_size_cap),
-          }),
-        },
-        token,
-      );
-      await refreshDashboard({ kind: "info", text: "오픈 슬롯을 만들었습니다." });
-    } catch (error) {
-      setMessage({ kind: "error", text: error.message });
-    }
+  async function submitOpenSlot(e) {
+    e.preventDefault();
+    try { await apiFetch("/api/admin/open-slots", { method: "POST", body: JSON.stringify({ slot_id: Number(openSlotForm.slot_id), party_size_cap: Number(openSlotForm.party_size_cap) }) }, token); await refresh({ kind: "info", text: "오픈 슬롯 생성 완료." }); }
+    catch (err) { setMessage({ kind: "error", text: err.message }); }
   }
-
-  async function dispatchOpenSlot(openSlotId) {
-    try {
-      await apiFetch(`/api/admin/open-slots/${openSlotId}/dispatch`, { method: "POST" }, token);
-      await refreshDashboard({ kind: "info", text: "대기열 오퍼를 발송했습니다." });
-    } catch (error) {
-      setMessage({ kind: "error", text: error.message });
-    }
+  async function dispatchOpenSlot(id) {
+    try { await apiFetch(`/api/admin/open-slots/${id}/dispatch`, { method: "POST" }, token); await refresh({ kind: "info", text: "오퍼 발송 완료." }); }
+    catch (err) { setMessage({ kind: "error", text: err.message }); }
   }
-
-  async function cancelReservation(reservationId) {
-    try {
-      await apiFetch(`/api/admin/reservations/${reservationId}/cancel`, { method: "POST" }, token);
-      await refreshDashboard({ kind: "info", text: "예약을 취소하고 대기열을 재평가했습니다." });
-    } catch (error) {
-      setMessage({ kind: "error", text: error.message });
-    }
+  async function cancelReservation(id) {
+    try { await apiFetch(`/api/admin/reservations/${id}/cancel`, { method: "POST" }, token); await refresh({ kind: "info", text: "예약 취소 및 대기열 재평가 완료." }); }
+    catch (err) { setMessage({ kind: "error", text: err.message }); }
   }
-
   async function runEngine() {
-    try {
-      const result = await apiFetch("/api/admin/engine/run", { method: "POST" }, token);
-      await refreshDashboard({
-        kind: "info",
-        text: `만료 검사 완료: claim ${result.expired_claims}건, payment ${result.expired_payments}건`,
-      });
-    } catch (error) {
-      setMessage({ kind: "error", text: error.message });
-    }
+    try { const r = await apiFetch("/api/admin/engine/run", { method: "POST" }, token); await refresh({ kind: "info", text: `만료 검사 완료: claim ${r.expired_claims}건, payment ${r.expired_payments}건` }); }
+    catch (err) { setMessage({ kind: "error", text: err.message }); }
   }
 
-  if (!token) {
-    return (
-      <Layout>
-        <section className="panel narrow-login">
-          <h3>관리자 로그인</h3>
-          <p>
-            기본 토큰은 <strong>admin123</strong> 입니다.
-          </p>
-          <Message message={message} />
-          <form onSubmit={submitAdminLogin}>
-            <div className="form-grid">
-              <label className="field full">
-                <span>Admin Token</span>
-                <input
-                  value={token}
-                  onChange={(event) => setToken(event.target.value)}
-                  placeholder="admin123"
-                />
-              </label>
-            </div>
-            <div className="button-row">
-              <button className="btn primary" type="submit">
-                로그인
-              </button>
-            </div>
-          </form>
-        </section>
-      </Layout>
-    );
-  }
+  if (!token) return (
+    <div className="admin-login-wrap">
+      <div className="admin-login-card">
+        <div className="title">관리자 로그인</div>
+        <div className="sub">ADMIN ACCESS</div>
+        {message && <div className={`luxury-msg ${message.kind}`}>{message.text}</div>}
+        <form onSubmit={login}>
+          <div className="admin-field">
+            <label>Admin Token</label>
+            <input value={token} onChange={e => setToken(e.target.value)} placeholder="admin123" />
+          </div>
+          <button className="admin-btn" type="submit" style={{ width: "100%", marginTop: 16 }}>로그인</button>
+        </form>
+      </div>
+    </div>
+  );
 
-  if (loading && !dashboard) {
-    return (
-      <Layout>
-        <section className="panel">
-          <div className="empty">대시보드를 불러오는 중입니다...</div>
-        </section>
-      </Layout>
-    );
-  }
+  if (loading && !dashboard) return (
+    <div className="admin-shell">
+      <nav className="admin-nav"><span className="admin-brand">Smart Booking — Admin</span></nav>
+      <div className="admin-main" style={{ fontFamily: "'Cormorant Garamond', serif", color: "var(--sepia-light)", fontSize: 18 }}>불러오는 중...</div>
+    </div>
+  );
 
   return (
-    <Layout>
-      <section className="panel">
-        <div className="card-head">
-          <div>
-            <p className="eyebrow">Admin Dashboard</p>
-            <h3>예약 엔진 운영 화면</h3>
-          </div>
-          <div className="button-row">
-            <button className="btn secondary" type="button" onClick={runEngine}>
-              만료 검사 실행
-            </button>
-            <button className="btn ghost" type="button" onClick={logout}>
-              로그아웃
-            </button>
-          </div>
+    <div className="admin-shell">
+      <nav className="admin-nav">
+        <span className="admin-brand">Smart Booking — Admin</span>
+        <div className="admin-nav-right">
+          <button className="admin-btn" onClick={runEngine}>만료 검사 실행</button>
+          <button className="admin-btn ghost" onClick={logout}>로그아웃</button>
         </div>
-        <Message message={message} />
-        {dashboard ? (
+      </nav>
+      <div className="admin-main">
+        {message && <div className={`luxury-msg ${message.kind}`} style={{ marginBottom: 24 }}>{message.text}</div>}
+
+        {dashboard && (
           <>
-            <div className="stats-row">
-              <div className="stat">
-                <strong>{dashboard.restaurants.length}</strong>
-                <span>Restaurants</span>
-              </div>
-              <div className="stat">
-                <strong>{dashboard.slots.length}</strong>
-                <span>Slots</span>
-              </div>
-              <div className="stat">
-                <strong>{dashboard.waitlists.length}</strong>
-                <span>Waitlists</span>
-              </div>
-              <div className="stat">
-                <strong>{dashboard.logs.length}</strong>
-                <span>Notification Logs</span>
+            <div className="admin-stats">
+              {[["Restaurants", dashboard.restaurants.length], ["Slots", dashboard.slots.length], ["Waitlists", dashboard.waitlists.length], ["Logs", dashboard.logs.length]].map(([l, v]) => (
+                <div key={l} className="admin-stat"><div className="admin-stat-val">{v}</div><div className="admin-stat-lbl">{l}</div></div>
+              ))}
+            </div>
+
+            <div className="admin-section">
+              <div className="admin-section-title">생성</div>
+              <div className="admin-grid-3">
+                <form className="admin-card" onSubmit={submitRestaurant}>
+                  <h4>식당 추가</h4>
+                  {[["이름","name","text",restaurantForm.name,v=>setRestaurantForm(c=>({...c,name:v}))],["설명","description","text",restaurantForm.description,v=>setRestaurantForm(c=>({...c,description:v}))],["연락 이메일","contact_email","email",restaurantForm.contact_email,v=>setRestaurantForm(c=>({...c,contact_email:v}))]].map(([label,,type,val,set])=>(
+                    <div key={label} className="admin-field"><label>{label}</label><input type={type} value={val} onChange={e=>set(e.target.value)} /></div>
+                  ))}
+                  <button className="admin-btn" type="submit">생성</button>
+                </form>
+                <form className="admin-card" onSubmit={submitTable}>
+                  <h4>테이블 추가</h4>
+                  <div className="admin-field"><label>식당</label>
+                    <select value={tableForm.restaurant_id} onChange={e=>setTableForm(c=>({...c,restaurant_id:e.target.value}))}>
+                      {dashboard.restaurants.map(r=><option key={r.id} value={r.id}>{r.name}</option>)}
+                    </select>
+                  </div>
+                  {[["이름","name","text",tableForm.name,v=>setTableForm(c=>({...c,name:v}))],["좌석 수","capacity","number",tableForm.capacity,v=>setTableForm(c=>({...c,capacity:v}))],["조합 그룹","combinable_group","text",tableForm.combinable_group,v=>setTableForm(c=>({...c,combinable_group:v}))]].map(([label,,type,val,set])=>(
+                    <div key={label} className="admin-field"><label>{label}</label><input type={type} value={val} onChange={e=>set(e.target.value)} placeholder={label==="조합 그룹"?"예: hall":""} /></div>
+                  ))}
+                  <button className="admin-btn" type="submit">추가</button>
+                </form>
+                <form className="admin-card" onSubmit={submitSlot}>
+                  <h4>슬롯 추가</h4>
+                  <div className="admin-field"><label>식당</label>
+                    <select value={slotForm.restaurant_id} onChange={e=>setSlotForm(c=>({...c,restaurant_id:e.target.value}))}>
+                      {dashboard.restaurants.map(r=><option key={r.id} value={r.id}>{r.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="admin-field"><label>날짜</label><input type="date" value={slotForm.day} onChange={e=>setSlotForm(c=>({...c,day:e.target.value}))} /></div>
+                  <div className="admin-field"><label>시간</label><input type="time" value={slotForm.time} onChange={e=>setSlotForm(c=>({...c,time:e.target.value}))} /></div>
+                  <button className="admin-btn" type="submit">슬롯 생성</button>
+                </form>
               </div>
             </div>
 
-            <div className="grid three">
-              <form className="mini-card" onSubmit={submitRestaurant}>
-                <h4>식당 추가</h4>
-                <div className="form-grid">
-                  <label className="field full">
-                    <span>이름</span>
-                    <input
-                      value={restaurantForm.name}
-                      onChange={(event) =>
-                        setRestaurantForm((current) => ({ ...current, name: event.target.value }))
-                      }
-                    />
-                  </label>
-                  <label className="field full">
-                    <span>설명</span>
-                    <textarea
-                      value={restaurantForm.description}
-                      onChange={(event) =>
-                        setRestaurantForm((current) => ({
-                          ...current,
-                          description: event.target.value,
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className="field full">
-                    <span>연락 이메일</span>
-                    <input
-                      type="email"
-                      value={restaurantForm.contact_email}
-                      onChange={(event) =>
-                        setRestaurantForm((current) => ({
-                          ...current,
-                          contact_email: event.target.value,
-                        }))
-                      }
-                    />
-                  </label>
+            <div className="admin-section">
+              <div className="admin-grid-2">
+                <div>
+                  <div className="admin-section-title">오픈 슬롯</div>
+                  <form className="admin-card" onSubmit={submitOpenSlot}>
+                    <div className="admin-field"><label>슬롯</label>
+                      <select value={openSlotForm.slot_id} onChange={e=>setOpenSlotForm(c=>({...c,slot_id:e.target.value}))}>
+                        {dashboard.slots.map(s=><option key={s.slot_id} value={s.slot_id}>{s.restaurant_name} / {s.day} {s.time}</option>)}
+                      </select>
+                    </div>
+                    <div className="admin-field"><label>허용 인원</label><input type="number" min="1" max="20" value={openSlotForm.party_size_cap} onChange={e=>setOpenSlotForm(c=>({...c,party_size_cap:e.target.value}))} /></div>
+                    <button className="admin-btn" type="submit">오픈 슬롯 생성</button>
+                  </form>
                 </div>
-                <div className="button-row">
-                  <button className="btn primary" type="submit">
-                    생성
-                  </button>
+                <div>
+                  <div className="admin-section-title">대기 요청</div>
+                  {dashboard.waitlists.length ? (
+                    <div className="admin-table-wrap">
+                      <table className="admin-table">
+                        <thead><tr><th>ID</th><th>손님</th><th>요청</th><th>상태</th></tr></thead>
+                        <tbody>
+                          {dashboard.waitlists.map(w=>(
+                            <tr key={w.id}>
+                              <td>#{w.id}</td>
+                              <td><strong>{w.guest_name}</strong><div className="muted">{w.guest_email}</div></td>
+                              <td>{w.restaurant_name}<br />{w.day} {w.time_start}–{w.time_end} / {w.party_size}명</td>
+                              <td><StatusBadge status={w.status} /></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : <div style={{ fontFamily: "'Cormorant Garamond', serif", color: "var(--sepia-light)", fontSize: 16, padding: "20px 0" }}>대기 요청이 없습니다.</div>}
                 </div>
-              </form>
-
-              <form className="mini-card" onSubmit={submitTable}>
-                <h4>테이블 추가</h4>
-                <div className="form-grid">
-                  <label className="field full">
-                    <span>식당</span>
-                    <select
-                      value={tableForm.restaurant_id}
-                      onChange={(event) =>
-                        setTableForm((current) => ({
-                          ...current,
-                          restaurant_id: event.target.value,
-                        }))
-                      }
-                    >
-                      {dashboard.restaurants.map((restaurant) => (
-                        <option key={restaurant.id} value={restaurant.id}>
-                          {restaurant.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field">
-                    <span>이름</span>
-                    <input
-                      value={tableForm.name}
-                      onChange={(event) =>
-                        setTableForm((current) => ({ ...current, name: event.target.value }))
-                      }
-                    />
-                  </label>
-                  <label className="field">
-                    <span>좌석 수</span>
-                    <input
-                      type="number"
-                      min="1"
-                      max="20"
-                      value={tableForm.capacity}
-                      onChange={(event) =>
-                        setTableForm((current) => ({ ...current, capacity: event.target.value }))
-                      }
-                    />
-                  </label>
-                  <label className="field full">
-                    <span>조합 그룹</span>
-                    <input
-                      value={tableForm.combinable_group}
-                      onChange={(event) =>
-                        setTableForm((current) => ({
-                          ...current,
-                          combinable_group: event.target.value,
-                        }))
-                      }
-                      placeholder="예: hall"
-                    />
-                  </label>
-                </div>
-                <div className="button-row">
-                  <button className="btn primary" type="submit">
-                    추가
-                  </button>
-                </div>
-              </form>
-
-              <form className="mini-card" onSubmit={submitSlot}>
-                <h4>슬롯 추가</h4>
-                <div className="form-grid">
-                  <label className="field full">
-                    <span>식당</span>
-                    <select
-                      value={slotForm.restaurant_id}
-                      onChange={(event) =>
-                        setSlotForm((current) => ({
-                          ...current,
-                          restaurant_id: event.target.value,
-                        }))
-                      }
-                    >
-                      {dashboard.restaurants.map((restaurant) => (
-                        <option key={restaurant.id} value={restaurant.id}>
-                          {restaurant.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field">
-                    <span>날짜</span>
-                    <input
-                      type="date"
-                      value={slotForm.day}
-                      onChange={(event) =>
-                        setSlotForm((current) => ({ ...current, day: event.target.value }))
-                      }
-                    />
-                  </label>
-                  <label className="field">
-                    <span>시간</span>
-                    <input
-                      type="time"
-                      value={slotForm.time}
-                      onChange={(event) =>
-                        setSlotForm((current) => ({ ...current, time: event.target.value }))
-                      }
-                    />
-                  </label>
-                </div>
-                <div className="button-row">
-                  <button className="btn primary" type="submit">
-                    슬롯 생성
-                  </button>
-                </div>
-              </form>
-            </div>
-          </>
-        ) : null}
-      </section>
-
-      {dashboard ? (
-        <>
-          <section className="grid two spacing-top">
-            <div className="panel">
-              <p className="eyebrow">Open Slots</p>
-              <h3>취소분 직접 열기</h3>
-              <form onSubmit={submitOpenSlot}>
-                <div className="form-grid">
-                  <label className="field">
-                    <span>슬롯</span>
-                    <select
-                      value={openSlotForm.slot_id}
-                      onChange={(event) =>
-                        setOpenSlotForm((current) => ({ ...current, slot_id: event.target.value }))
-                      }
-                    >
-                      {dashboard.slots.map((slot) => (
-                        <option key={slot.slot_id} value={slot.slot_id}>
-                          {slot.restaurant_name} / {slot.day} {slot.time}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field">
-                    <span>허용 인원</span>
-                    <input
-                      type="number"
-                      min="1"
-                      max="20"
-                      value={openSlotForm.party_size_cap}
-                      onChange={(event) =>
-                        setOpenSlotForm((current) => ({
-                          ...current,
-                          party_size_cap: event.target.value,
-                        }))
-                      }
-                    />
-                  </label>
-                </div>
-                <div className="button-row">
-                  <button className="btn primary" type="submit">
-                    오픈 슬롯 생성
-                  </button>
-                </div>
-              </form>
-
-              <div className="cards spacing-top">
-                {dashboard.tables.length ? (
-                  dashboard.tables.map((table) => {
-                    const restaurant = dashboard.restaurants.find(
-                      (item) => item.id === table.restaurant_id,
-                    );
-                    return (
-                      <div className="mini-card" key={table.id}>
-                        <div className="card-head">
-                          <strong>{table.name}</strong>
-                          <span className="pill">{table.capacity} seats</span>
-                        </div>
-                        <div className="muted">
-                          {restaurant?.name || "-"}
-                          {table.combinable_group ? ` / group ${table.combinable_group}` : ""}
-                        </div>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div className="empty">테이블이 아직 없습니다.</div>
-                )}
               </div>
             </div>
 
-            <div className="panel">
-              <p className="eyebrow">Waitlist</p>
-              <h3>대기 요청 현황</h3>
-              {dashboard.waitlists.length ? (
-                <div className="list-card">
-                  <table className="list-table">
-                    <thead>
-                      <tr>
-                        <th>ID</th>
-                        <th>손님</th>
-                        <th>연락처</th>
-                        <th>요청</th>
-                        <th>상태</th>
-                      </tr>
-                    </thead>
+            <div className="admin-section">
+              <div className="admin-section-title">슬롯별 예약 현황</div>
+              {dashboard.slots.map(slot => (
+                <div key={slot.slot_id} className="admin-slot-card">
+                  <div className="admin-slot-head">
+                    <div>
+                      <div className="eyebrow">{slot.restaurant_name}</div>
+                      <h4>{slot.day} {slot.time}</h4>
+                    </div>
+                    <div className="admin-slot-head-right">
+                      <StatusBadge status={slot.is_open ? "open" : "closed"} />
+                      {slot.open_slot && (
+                        <>
+                          <span style={{ fontFamily: "'Cormorant SC', serif", fontSize: 9, letterSpacing: "0.15em", color: "var(--sepia-mid)", padding: "3px 8px", border: "1px solid rgba(0,0,0,0.15)" }}>{slot.open_slot.party_size_cap}명 오픈</span>
+                          <button className="admin-btn small" onClick={() => dispatchOpenSlot(slot.open_slot.id)}>대기열 발송</button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  {slot.reservations.length ? (
+                    <div className="admin-table-wrap">
+                      <table className="admin-table">
+                        <thead><tr><th>ID</th><th>손님</th><th>인원</th><th>테이블</th><th>결제</th><th>상태</th><th></th></tr></thead>
+                        <tbody>
+                          {slot.reservations.map(r => (
+                            <tr key={r.id}>
+                              <td>#{r.id}</td>
+                              <td><strong>{r.guest_name}</strong><div className="muted">{r.guest_email}</div><div className="muted">{r.phone_number || "-"}</div></td>
+                              <td>{r.party_size}명</td>
+                              <td>{r.tables.join(", ") || "-"}</td>
+                              <td><StatusBadge status={r.payment_status || "none"} /></td>
+                              <td><StatusBadge status={r.status} /></td>
+                              <td><button className="admin-btn small danger" onClick={() => cancelReservation(r.id)}>취소</button></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : <div style={{ padding: "16px 20px", fontFamily: "'Cormorant Garamond', serif", color: "var(--sepia-light)", fontSize: 15 }}>예약 없음</div>}
+                </div>
+              ))}
+            </div>
+
+            <div className="admin-section">
+              <div className="admin-section-title">알림 발송 로그</div>
+              {dashboard.logs.length ? (
+                <div className="admin-table-wrap">
+                  <table className="admin-table">
+                    <thead><tr><th>ID</th><th>Waitlist</th><th>Claim</th><th>채널</th><th>결과</th><th>시간</th></tr></thead>
                     <tbody>
-                      {dashboard.waitlists.map((item) => (
-                        <tr key={item.id}>
-                          <td>#{item.id}</td>
-                          <td>
-                            <strong>{item.guest_name}</strong>
-                            <div className="muted">{item.guest_email}</div>
-                          </td>
-                          <td>{item.phone_number || "-"}</td>
-                          <td>
-                            {item.restaurant_name}
-                            <br />
-                            {item.day} {item.time_start}-{item.time_end} / {item.party_size}명
-                          </td>
-                          <td>
-                            <StatusBadge status={item.status} />
-                          </td>
+                      {dashboard.logs.map(log => (
+                        <tr key={log.id}>
+                          <td>#{log.id}</td>
+                          <td>{log.waitlist_id}</td>
+                          <td>{log.claim_id || "-"}</td>
+                          <td>{log.channel}</td>
+                          <td><StatusBadge status={log.result} /><div className="muted">{log.detail}</div></td>
+                          <td>{log.sent_at.replace("T", " ").slice(0, 16)} UTC</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-              ) : (
-                <div className="empty">대기 요청이 아직 없습니다.</div>
-              )}
+              ) : <div style={{ fontFamily: "'Cormorant Garamond', serif", color: "var(--sepia-light)", fontSize: 16, padding: "12px 0" }}>로그 없음</div>}
             </div>
-          </section>
-
-          <section className="panel spacing-top">
-            <p className="eyebrow">Reservations</p>
-            <h3>슬롯별 예약 현황</h3>
-            <div className="cards">
-              {dashboard.slots.length ? (
-                dashboard.slots.map((slot) => (
-                  <div className="slot-card" key={slot.slot_id}>
-                    <div className="slot-head">
-                      <div>
-                        <p className="eyebrow">{slot.restaurant_name}</p>
-                        <h4>
-                          {slot.day} {slot.time}
-                        </h4>
-                      </div>
-                      <div className="button-row">
-                        <StatusBadge status={slot.is_open ? "open" : "closed"} />
-                        {slot.open_slot ? (
-                          <>
-                            <span className="pill">{slot.open_slot.party_size_cap}명 오픈</span>
-                            <button
-                              className="btn secondary small"
-                              type="button"
-                              onClick={() => dispatchOpenSlot(slot.open_slot.id)}
-                            >
-                              대기열 발송
-                            </button>
-                          </>
-                        ) : null}
-                      </div>
-                    </div>
-
-                    {slot.reservations.length ? (
-                      <div className="list-card">
-                        <table className="list-table">
-                          <thead>
-                            <tr>
-                              <th>ID</th>
-                              <th>손님</th>
-                              <th>인원</th>
-                              <th>테이블</th>
-                              <th>결제</th>
-                              <th>상태</th>
-                              <th>동작</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {slot.reservations.map((reservation) => (
-                              <tr key={reservation.id}>
-                                <td>#{reservation.id}</td>
-                                <td>
-                                  <strong>{reservation.guest_name}</strong>
-                                  <div className="muted">{reservation.guest_email}</div>
-                                  <div className="muted">{reservation.phone_number || "-"}</div>
-                                </td>
-                                <td>{reservation.party_size}명</td>
-                                <td>{reservation.tables.join(", ") || "-"}</td>
-                                <td>
-                                  <StatusBadge status={reservation.payment_status || "none"} />
-                                </td>
-                                <td>
-                                  <StatusBadge status={reservation.status} />
-                                </td>
-                                <td>
-                                  <button
-                                    className="btn ghost small"
-                                    type="button"
-                                    onClick={() => cancelReservation(reservation.id)}
-                                  >
-                                    취소
-                                  </button>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    ) : (
-                      <div className="empty">아직 예약이 없습니다.</div>
-                    )}
-                  </div>
-                ))
-              ) : (
-                <div className="empty">슬롯이 아직 없습니다.</div>
-              )}
-            </div>
-          </section>
-
-          <section className="panel spacing-top">
-            <p className="eyebrow">Logs</p>
-            <h3>알림 발송 로그</h3>
-            {dashboard.logs.length ? (
-              <div className="list-card">
-                <table className="list-table">
-                  <thead>
-                    <tr>
-                      <th>ID</th>
-                      <th>Waitlist</th>
-                      <th>Claim</th>
-                      <th>채널</th>
-                      <th>결과</th>
-                      <th>시간</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {dashboard.logs.map((log) => (
-                      <tr key={log.id}>
-                        <td>#{log.id}</td>
-                        <td>{log.waitlist_id}</td>
-                        <td>{log.claim_id || "-"}</td>
-                        <td>{log.channel}</td>
-                        <td>
-                          <div>
-                            <StatusBadge status={log.result} />
-                          </div>
-                          <div className="muted">{log.detail}</div>
-                        </td>
-                        <td>{log.sent_at.replace("T", " ").slice(0, 16)} UTC</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="empty">로그가 아직 없습니다.</div>
-            )}
-          </section>
-        </>
-      ) : null}
-    </Layout>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 
+// ── ROUTER ──────────────────────────────────────────────────
 export default function App() {
   const route = getRoute();
-
-  if (route.name === "admin") {
-    return <AdminPage />;
-  }
-
-  if (route.name === "claim") {
-    return <ClaimPage token={route.token} />;
-  }
-
-  if (route.name === "pay") {
-    return <PaymentPage token={route.token} />;
-  }
-
+  if (route.name === "admin") return <AdminPage />;
+  if (route.name === "claim") return <ClaimPage token={route.token} />;
+  if (route.name === "pay") return <PaymentPage token={route.token} />;
   return <GuestPage />;
 }
