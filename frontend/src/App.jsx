@@ -1088,8 +1088,18 @@ function AdminPage() {
     catch (err) { setMessage({ kind: "error", text: err.message }); }
   }
   async function deleteAllReservations() {
-    if (!confirm("모든 예약을 완전히 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.")) return;
-    try { const r = await apiFetch("/api/admin/reservations", { method: "DELETE" }, token); await refresh({ kind: "info", text: `예약 ${r.deleted}건 전체 삭제 완료.` }); }
+    if (!confirm("모든 예약 및 대기 요청을 완전히 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.")) return;
+    try { const r = await apiFetch("/api/admin/reservations", { method: "DELETE" }, token); await refresh({ kind: "info", text: `예약 ${r.deleted}건 및 대기 요청 전체 삭제 완료.` }); }
+    catch (err) { setMessage({ kind: "error", text: err.message }); }
+  }
+  async function deleteWaitlist(id) {
+    if (!confirm(`대기 요청 #${id}을(를) 삭제하시겠습니까?`)) return;
+    try { await apiFetch(`/api/admin/waitlist/${id}`, { method: "DELETE" }, token); await refresh({ kind: "info", text: "대기 요청 삭제 완료." }); }
+    catch (err) { setMessage({ kind: "error", text: err.message }); }
+  }
+  async function deleteRestaurant(id, name) {
+    if (!confirm(`"${name}" 식당과 모든 관련 데이터를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.`)) return;
+    try { await apiFetch(`/api/admin/restaurants/${id}`, { method: "DELETE" }, token); await refresh({ kind: "info", text: `${name} 삭제 완료.` }); }
     catch (err) { setMessage({ kind: "error", text: err.message }); }
   }
   async function runEngine() {
@@ -1141,6 +1151,26 @@ function AdminPage() {
               {[["Restaurants", dashboard.restaurants.length], ["Slots", dashboard.slots.length], ["Waitlists", dashboard.waitlists.length], ["Logs", dashboard.logs.length]].map(([l, v]) => (
                 <div key={l} className="admin-stat"><div className="admin-stat-val">{v}</div><div className="admin-stat-lbl">{l}</div></div>
               ))}
+            </div>
+
+            <div className="admin-section">
+              <div className="admin-section-title">식당 관리</div>
+              <div className="admin-table-wrap" style={{ marginBottom: 24 }}>
+                <table className="admin-table">
+                  <thead><tr><th>ID</th><th>이름</th><th>설명</th><th>이메일</th><th></th></tr></thead>
+                  <tbody>
+                    {dashboard.restaurants.map(r => (
+                      <tr key={r.id}>
+                        <td>#{r.id}</td>
+                        <td><strong>{r.name}</strong></td>
+                        <td className="muted">{r.description || "-"}</td>
+                        <td className="muted">{r.contact_email || "-"}</td>
+                        <td><button className="admin-btn small danger" onClick={() => deleteRestaurant(r.id, r.name)}>삭제</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             <div className="admin-section">
@@ -1198,7 +1228,7 @@ function AdminPage() {
                   {dashboard.waitlists.length ? (
                     <div className="admin-table-wrap">
                       <table className="admin-table">
-                        <thead><tr><th>ID</th><th>손님</th><th>요청</th><th>상태</th></tr></thead>
+                        <thead><tr><th>ID</th><th>손님</th><th>요청</th><th>상태</th><th></th></tr></thead>
                         <tbody>
                           {dashboard.waitlists.map(w=>(
                             <tr key={w.id}>
@@ -1206,6 +1236,7 @@ function AdminPage() {
                               <td><strong>{w.guest_name}</strong><div className="muted">{w.guest_email}</div></td>
                               <td>{w.restaurant_name}<br />{w.day} {w.time_start}–{w.time_end} / {w.party_size}명</td>
                               <td><StatusBadge status={w.status} /></td>
+                              <td><button className="admin-btn small danger" onClick={() => deleteWaitlist(w.id)}>삭제</button></td>
                             </tr>
                           ))}
                         </tbody>

@@ -755,12 +755,68 @@ def admin_delete_all_reservations(
     _admin: str = Depends(require_admin),
     db: Session = Depends(get_db),
 ) -> dict:
-    ids = [r.id for r in db.query(Reservation.id).all()]
-    db.query(ReservationTable).filter(ReservationTable.reservation_id.in_(ids)).delete(synchronize_session=False)
-    db.query(Payment).filter(Payment.reservation_id.in_(ids)).delete(synchronize_session=False)
+    res_ids = [r.id for r in db.query(Reservation.id).all()]
+    db.query(ReservationTable).filter(ReservationTable.reservation_id.in_(res_ids)).delete(synchronize_session=False)
+    db.query(Payment).filter(Payment.reservation_id.in_(res_ids)).delete(synchronize_session=False)
     db.query(Reservation).delete(synchronize_session=False)
+    # Also wipe waitlist-related data
+    db.query(NotificationLog).delete(synchronize_session=False)
+    db.query(Claim).delete(synchronize_session=False)
+    db.query(WaitlistRequest).delete(synchronize_session=False)
+    db.query(OpenSlot).delete(synchronize_session=False)
     db.commit()
-    return {"ok": True, "deleted": len(ids)}
+    return {"ok": True, "deleted": len(res_ids)}
+
+
+@app.delete("/api/admin/waitlist/{waitlist_id}")
+def admin_delete_waitlist(
+    waitlist_id: int,
+    _admin: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    waitlist = db.get(WaitlistRequest, waitlist_id)
+    if not waitlist:
+        raise HTTPException(status_code=404, detail="Waitlist request not found")
+    db.query(NotificationLog).filter(NotificationLog.waitlist_id == waitlist_id).delete()
+    claim = db.query(Claim).filter(Claim.waitlist_id == waitlist_id).first()
+    if claim:
+        db.delete(claim)
+    db.delete(waitlist)
+    db.commit()
+    return {"ok": True}
+
+
+@app.delete("/api/admin/restaurants/{restaurant_id}")
+def admin_delete_restaurant(
+    restaurant_id: int,
+    _admin: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    restaurant = db.get(Restaurant, restaurant_id)
+    if not restaurant:
+        raise HTTPException(status_code=404, detail="Restaurant not found")
+    # cascade: slots → open_slots → claims/waitlists/logs, reservations → payments/tables
+    slot_ids = [s.id for s in db.query(Slot.id).filter(Slot.restaurant_id == restaurant_id).all()]
+    if slot_ids:
+        open_slot_ids = [o.id for o in db.query(OpenSlot.id).filter(OpenSlot.slot_id.in_(slot_ids)).all()]
+        if open_slot_ids:
+            db.query(Claim).filter(Claim.open_slot_id.in_(open_slot_ids)).delete(synchronize_session=False)
+        db.query(OpenSlot).filter(OpenSlot.slot_id.in_(slot_ids)).delete(synchronize_session=False)
+        res_ids = [r.id for r in db.query(Reservation.id).filter(Reservation.slot_id.in_(slot_ids)).all()]
+        if res_ids:
+            db.query(ReservationTable).filter(ReservationTable.reservation_id.in_(res_ids)).delete(synchronize_session=False)
+            db.query(Payment).filter(Payment.reservation_id.in_(res_ids)).delete(synchronize_session=False)
+            db.query(Reservation).filter(Reservation.id.in_(res_ids)).delete(synchronize_session=False)
+        db.query(Slot).filter(Slot.id.in_(slot_ids)).delete(synchronize_session=False)
+    wl_ids = [w.id for w in db.query(WaitlistRequest.id).filter(WaitlistRequest.restaurant_id == restaurant_id).all()]
+    if wl_ids:
+        db.query(NotificationLog).filter(NotificationLog.waitlist_id.in_(wl_ids)).delete(synchronize_session=False)
+        db.query(Claim).filter(Claim.waitlist_id.in_(wl_ids)).delete(synchronize_session=False)
+        db.query(WaitlistRequest).filter(WaitlistRequest.id.in_(wl_ids)).delete(synchronize_session=False)
+    db.query(DiningTable).filter(DiningTable.restaurant_id == restaurant_id).delete(synchronize_session=False)
+    db.delete(restaurant)
+    db.commit()
+    return {"ok": True}
 
 
 @app.post("/api/admin/engine/run")
