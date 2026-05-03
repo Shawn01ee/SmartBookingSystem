@@ -719,7 +719,7 @@ def admin_dispatch_open_slot(
     open_slot = db.get(OpenSlot, open_slot_id)
     if not open_slot:
         raise HTTPException(status_code=404, detail="Open slot not found")
-    return dispatch_next_waitlister(db, open_slot)
+    return dispatch_next_waitlister(db, open_slot, force=True)
 
 
 @app.post("/api/admin/reservations/{reservation_id}/cancel")
@@ -732,6 +732,35 @@ def admin_cancel_reservation(
     if not result.get("ok"):
         raise HTTPException(status_code=404, detail=result["reason"])
     return result
+
+
+@app.delete("/api/admin/reservations/{reservation_id}")
+def admin_delete_reservation(
+    reservation_id: int,
+    _admin: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    reservation = db.get(Reservation, reservation_id)
+    if not reservation:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+    db.query(ReservationTable).filter(ReservationTable.reservation_id == reservation_id).delete()
+    db.query(Payment).filter(Payment.reservation_id == reservation_id).delete()
+    db.delete(reservation)
+    db.commit()
+    return {"ok": True}
+
+
+@app.delete("/api/admin/reservations")
+def admin_delete_all_reservations(
+    _admin: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    ids = [r.id for r in db.query(Reservation.id).all()]
+    db.query(ReservationTable).filter(ReservationTable.reservation_id.in_(ids)).delete(synchronize_session=False)
+    db.query(Payment).filter(Payment.reservation_id.in_(ids)).delete(synchronize_session=False)
+    db.query(Reservation).delete(synchronize_session=False)
+    db.commit()
+    return {"ok": True, "deleted": len(ids)}
 
 
 @app.post("/api/admin/engine/run")

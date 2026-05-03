@@ -1082,6 +1082,16 @@ function AdminPage() {
     try { await apiFetch(`/api/admin/reservations/${id}/cancel`, { method: "POST" }, token); await refresh({ kind: "info", text: "예약 취소 및 대기열 재평가 완료." }); }
     catch (err) { setMessage({ kind: "error", text: err.message }); }
   }
+  async function deleteReservation(id) {
+    if (!confirm(`예약 #${id}을(를) 완전히 삭제하시겠습니까?`)) return;
+    try { await apiFetch(`/api/admin/reservations/${id}`, { method: "DELETE" }, token); await refresh({ kind: "info", text: "예약 삭제 완료." }); }
+    catch (err) { setMessage({ kind: "error", text: err.message }); }
+  }
+  async function deleteAllReservations() {
+    if (!confirm("모든 예약을 완전히 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.")) return;
+    try { const r = await apiFetch("/api/admin/reservations", { method: "DELETE" }, token); await refresh({ kind: "info", text: `예약 ${r.deleted}건 전체 삭제 완료.` }); }
+    catch (err) { setMessage({ kind: "error", text: err.message }); }
+  }
   async function runEngine() {
     try { const r = await apiFetch("/api/admin/engine/run", { method: "POST" }, token); await refresh({ kind: "info", text: `만료 검사 완료: claim ${r.expired_claims}건, payment ${r.expired_payments}건` }); }
     catch (err) { setMessage({ kind: "error", text: err.message }); }
@@ -1116,7 +1126,9 @@ function AdminPage() {
       <nav className="admin-nav">
         <span className="admin-brand">Smart Booking — Admin</span>
         <div className="admin-nav-right">
+          <button className="admin-btn ghost" onClick={() => window.location.href = "/"}>홈으로</button>
           <button className="admin-btn" onClick={runEngine}>만료 검사 실행</button>
+          <button className="admin-btn danger" onClick={deleteAllReservations}>전체 삭제</button>
           <button className="admin-btn ghost" onClick={logout}>로그아웃</button>
         </div>
       </nav>
@@ -1236,7 +1248,10 @@ function AdminPage() {
                               <td>{r.tables.join(", ") || "-"}</td>
                               <td><StatusBadge status={r.payment_status || "none"} /></td>
                               <td><StatusBadge status={r.status} /></td>
-                              <td><button className="admin-btn small danger" onClick={() => cancelReservation(r.id)}>취소</button></td>
+                              <td style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                <button className="admin-btn small danger" onClick={() => cancelReservation(r.id)}>취소</button>
+                                <button className="admin-btn small danger" onClick={() => deleteReservation(r.id)}>삭제</button>
+                              </td>
                             </tr>
                           ))}
                         </tbody>

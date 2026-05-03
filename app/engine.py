@@ -311,26 +311,38 @@ def send_claim_email(db: Session, waitlist: WaitlistRequest, claim: Claim) -> tu
     return ok, detail
 
 
-def dispatch_next_waitlister(db: Session, open_slot: OpenSlot) -> dict:
+def dispatch_next_waitlister(db: Session, open_slot: OpenSlot, force: bool = False) -> dict:
     if not open_slot.is_active:
         return {"ok": False, "reason": "open_slot_inactive"}
 
+    # Existing active claim for this slot
     active_claim = (
         db.query(Claim)
         .filter(Claim.open_slot_id == open_slot.id, Claim.status == "active")
         .first()
     )
     if active_claim:
-        return {"ok": True, "reason": "claim_already_active", "claim_token": active_claim.token}
+        if not force:
+            return {"ok": True, "reason": "claim_already_active", "claim_token": active_claim.token}
+        # force=True: expire the existing claim so we can re-dispatch
+        active_claim.status = "expired"
+        stale_waitlist = db.get(WaitlistRequest, active_claim.waitlist_id)
+        if stale_waitlist and stale_waitlist.status == "offered":
+            stale_waitlist.status = "active"
+        db.commit()
 
     for waitlist in match_waitlists(db, open_slot):
-        duplicate = (
+        existing_claim = (
             db.query(Claim)
             .filter(Claim.waitlist_id == waitlist.id, Claim.status == "active")
             .first()
         )
-        if duplicate:
-            continue
+        if existing_claim:
+            if not force:
+                continue
+            # force=True: expire previous claim for this waitlister and re-send
+            existing_claim.status = "expired"
+            db.commit()
 
         claim = create_claim(db, open_slot, waitlist)
         ok, detail = send_claim_email(db, waitlist, claim)
