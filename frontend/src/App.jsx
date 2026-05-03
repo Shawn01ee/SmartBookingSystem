@@ -105,6 +105,12 @@ function GuestPage() {
   const [booking, setBooking] = useState(null);
   const [modalMsg, setModalMsg] = useState(null);
 
+  // my reservations
+  const [myEmail, setMyEmail] = useState("");
+  const [myData, setMyData] = useState(null);
+  const [myLoading, setMyLoading] = useState(false);
+  const [myMsg, setMyMsg] = useState(null);
+
   // waitlist
   const [waitDay, setWaitDay] = useState("");
   const [waitTimeStart, setWaitTimeStart] = useState("18:00");
@@ -253,6 +259,20 @@ function GuestPage() {
     } catch (e) { setModalMsg({ kind: "error", text: e.message }); }
   }
 
+  async function fetchMyReservations() {
+    const n = normalizeEmail(myEmail);
+    if (!n) { setMyMsg({ kind: "error", text: "이메일을 입력해 주세요." }); return; }
+    setMyLoading(true); setMyMsg(null); setMyData(null);
+    try {
+      const data = await apiFetch(`/api/public/my-reservations?email=${encodeURIComponent(n)}`);
+      setMyData(data);
+      if (!data.reservations.length && !data.waitlists.length) {
+        setMyMsg({ kind: "info", text: "해당 이메일로 등록된 예약 내역이 없습니다." });
+      }
+    } catch (e) { setMyMsg({ kind: "error", text: e.message }); }
+    finally { setMyLoading(false); }
+  }
+
   async function submitAutoWaitlist() {
     setModalMsg(null);
     try {
@@ -341,6 +361,7 @@ function GuestPage() {
             <button className="nav-link" onClick={openWaitlist}>대기 등록</button>
           </div>
           <div className="hero-nav-col right">
+            <button className="nav-link" onClick={() => { setMyData(null); setMyMsg(null); setMyEmail(""); setModal("my_reservations"); }}>내 예약</button>
             <button className="nav-link" onClick={openBooking}>예약</button>
             <a className="nav-link" href="/admin">관리자</a>
           </div>
@@ -623,6 +644,90 @@ function GuestPage() {
                     <button className="modal-next-btn gold" onClick={submitReservation}>결제하기</button>
                   </>
                 )}
+              </div>
+            </>
+          )}
+
+          {/* MY RESERVATIONS MODAL */}
+          {modal === "my_reservations" && (
+            <>
+              <div className="modal-head">
+                <button className="modal-close" onClick={closeModal}>×</button>
+                <div className="modal-step-label">— 예약 조회</div>
+                <div className="modal-title">내 예약 확인</div>
+              </div>
+              <div className="modal-body">
+                <div className="info-fields">
+                  <div className="info-field full">
+                    <label>이메일</label>
+                    <div className="verify-row">
+                      <div className="info-field" style={{ margin: 0, flex: 1 }}>
+                        <input type="email" value={myEmail}
+                          onChange={e => setMyEmail(e.target.value)}
+                          onKeyDown={e => e.key === "Enter" && fetchMyReservations()}
+                          placeholder="name@example.com" />
+                      </div>
+                      <button className="verify-btn" type="button"
+                        onClick={fetchMyReservations} disabled={myLoading}>
+                        {myLoading ? "조회 중…" : "조회"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {myMsg && <div className={`verify-msg ${myMsg.kind}`} style={{ marginTop: 8 }}>{myMsg.text}</div>}
+
+                {myData && (myData.reservations.length > 0 || myData.waitlists.length > 0) && (
+                  <div style={{ marginTop: 24 }}>
+                    {myData.reservations.length > 0 && (
+                      <>
+                        <div className="sel-label" style={{ marginBottom: 10 }}>예약 내역</div>
+                        {myData.reservations.map(r => (
+                          <div key={r.id} className="my-res-card">
+                            <div className="my-res-top">
+                              <span className="my-res-restaurant">{r.restaurant}</span>
+                              <span className={`status-badge ${r.status}`}>
+                                {r.status === "confirmed" ? "예약 확정" : "결제 대기"}
+                              </span>
+                            </div>
+                            <div className="my-res-row">
+                              <span>📅 {fmtDate(r.day)}</span>
+                              <span>🕐 {r.time}</span>
+                              <span>👤 {r.party_size}명</span>
+                            </div>
+                            {r.tables.length > 0 && (
+                              <div className="my-res-sub">테이블 {r.tables.join(", ")}</div>
+                            )}
+                          </div>
+                        ))}
+                      </>
+                    )}
+
+                    {myData.waitlists.length > 0 && (
+                      <>
+                        <div className="sel-label" style={{ marginTop: 20, marginBottom: 10 }}>대기 내역</div>
+                        {myData.waitlists.map(w => (
+                          <div key={w.id} className="my-res-card waitlist">
+                            <div className="my-res-top">
+                              <span className="my-res-restaurant">{w.restaurant}</span>
+                              <span className={`status-badge ${w.status === "offered" ? "open" : "pending"}`}>
+                                {w.status === "offered" ? "오퍼 수신" : "대기 중"}
+                              </span>
+                            </div>
+                            <div className="my-res-row">
+                              <span>📅 {fmtDate(w.day)}</span>
+                              <span>🕐 {w.time}</span>
+                              <span>👤 {w.party_size}명</span>
+                            </div>
+                          </div>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div className="modal-foot">
+                <button className="modal-next-btn" style={{ width: "100%" }} onClick={closeModal}>닫기</button>
               </div>
             </>
           )}

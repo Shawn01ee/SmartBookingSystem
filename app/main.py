@@ -508,6 +508,53 @@ def get_payment(token: str, db: Session = Depends(get_db)) -> PaymentOut:
     return PaymentOut(**payment_summary(db, payment))
 
 
+@app.get("/api/public/my-reservations")
+def get_my_reservations(email: str, db: Session = Depends(get_db)) -> dict:
+    norm = normalize_email(email)
+    reservations = (
+        db.query(Reservation)
+        .filter(Reservation.guest_email == norm, Reservation.status.in_(["confirmed", "pending"]))
+        .order_by(Reservation.created_at.desc())
+        .all()
+    )
+    waitlists = (
+        db.query(WaitlistRequest)
+        .filter(WaitlistRequest.guest_email == norm, WaitlistRequest.status.in_(["active", "offered"]))
+        .order_by(WaitlistRequest.created_at.desc())
+        .all()
+    )
+
+    res_list = []
+    for r in reservations:
+        slot = db.query(Slot).filter(Slot.id == r.slot_id).first()
+        rest = db.query(Restaurant).filter(Restaurant.id == r.restaurant_id).first()
+        assignments = db.query(ReservationTable).filter(ReservationTable.reservation_id == r.id).all()
+        tables = db.query(DiningTable).filter(DiningTable.id.in_([a.table_id for a in assignments])).all() if assignments else []
+        res_list.append({
+            "id": r.id,
+            "restaurant": rest.name if rest else "—",
+            "day": slot.day.isoformat() if slot else "—",
+            "time": slot.time.strftime("%H:%M") if slot else "—",
+            "party_size": r.party_size,
+            "status": r.status,
+            "tables": [t.name for t in tables],
+        })
+
+    wait_list = []
+    for w in waitlists:
+        rest = db.query(Restaurant).filter(Restaurant.id == w.restaurant_id).first()
+        wait_list.append({
+            "id": w.id,
+            "restaurant": rest.name if rest else "—",
+            "day": w.day.isoformat(),
+            "time": w.time_start.strftime("%H:%M"),
+            "party_size": w.party_size,
+            "status": w.status,
+        })
+
+    return {"reservations": res_list, "waitlists": wait_list}
+
+
 @app.get("/api/public/reservations/booked-slots")
 def get_booked_slots(email: str, db: Session = Depends(get_db)) -> dict:
     """Return slot IDs and days that this email already has active reservations for."""

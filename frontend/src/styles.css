@@ -378,6 +378,33 @@ button, input, select, textarea { font: inherit; }
 }
 .refund-box strong { color: var(--sepia-dark); display: block; margin-bottom: 4px; font-weight: 600; }
 
+/* My Reservations cards */
+.my-res-card {
+  border: 1px solid var(--line-dark);
+  background: white;
+  padding: 16px 20px;
+  margin-bottom: 10px;
+}
+.my-res-card.waitlist { background: var(--cream); }
+.my-res-top {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 10px; gap: 12px;
+}
+.my-res-restaurant {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 17px; font-weight: 600; color: var(--ink);
+}
+.my-res-row {
+  display: flex; gap: 16px; flex-wrap: wrap;
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 14px; color: var(--sepia-mid);
+}
+.my-res-sub {
+  font-size: 11px; color: var(--sepia-light);
+  font-family: 'Cormorant SC', serif; letter-spacing: 0.1em;
+  margin-top: 8px;
+}
+
 /* Modal buttons */
 .modal-back-btn {
   padding: 14px 28px;
