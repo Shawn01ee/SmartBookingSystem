@@ -6,11 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Backend (FastAPI)
 ```bash
-# Install dependencies (uses Python 3.11 venv)
-.venv311/bin/pip install -r requirements.txt
+# Install dependencies (Python 3.12, managed by uv)
+uv sync
 
 # Run backend (hot-reload)
-.venv311/bin/uvicorn app.main:app --reload
+uv run uvicorn app.main:app --reload
 # → http://127.0.0.1:8000  (serves built frontend SPA)
 # → Admin UI: http://127.0.0.1:8000/admin  (token: admin123)
 ```
@@ -26,7 +26,7 @@ npm run build    # Production build → frontend/dist/ (served by FastAPI)
 ### Testing
 ```bash
 # Integration smoke test (requires running backend on :8000)
-.venv311/bin/python scripts/smoke_test.py
+uv run python scripts/smoke_test.py
 ```
 
 ## Architecture
