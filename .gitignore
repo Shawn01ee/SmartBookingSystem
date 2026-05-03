@@ -4,6 +4,6 @@ __pycache__/
 *.pyc
 *.db
 frontend/node_modules/
-frontend/dist/
+# frontend/dist/ committed so Vercel serves the built SPA without a separate build step
 .mcp.json
 .vercel

@@ -631,9 +631,8 @@ def admin_run_engine(
 
 
 def spa() -> FileResponse:
-    if (FRONTEND_DIST_PATH / "index.html").exists():
-        return FileResponse(FRONTEND_DIST_PATH / "index.html")
-    return FileResponse(STATIC_PATH / "index.html")
+    path = (FRONTEND_DIST_PATH / "index.html") if (FRONTEND_DIST_PATH / "index.html").exists() else (STATIC_PATH / "index.html")
+    return FileResponse(path, headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
 
 @app.get("/")
