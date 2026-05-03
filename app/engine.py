@@ -11,6 +11,7 @@ from .config import (
     DEPOSIT_PER_PERSON,
     EMAIL_VERIFICATION_CODE_TTL_SECONDS,
     EMAIL_VERIFICATION_SESSION_TTL_SECONDS,
+    MAX_RESERVATIONS_PER_SLOT,
     PAYMENT_TTL_SECONDS,
 )
 from .emailer import send_email
@@ -392,6 +393,15 @@ def create_pending_reservation_and_payment(
             if stale_payment:
                 stale_payment.status = "failed"
     db.commit()
+
+    # Enforce per-slot reservation cap
+    confirmed_count = (
+        db.query(Reservation)
+        .filter(Reservation.slot_id == slot_id, Reservation.status == "confirmed")
+        .count()
+    )
+    if confirmed_count >= MAX_RESERVATIONS_PER_SLOT:
+        return {"ok": False, "reason": "fully_booked"}
 
     tables = find_best_tables(db, restaurant_id, slot_id, party_size, max_tables=3)
     if not tables:

@@ -19,6 +19,8 @@ else:
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "admin123")
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://127.0.0.1:8000")
 
+MAX_RESERVATIONS_PER_SLOT = int(os.getenv("MAX_RESERVATIONS_PER_SLOT", "3"))
+
 CLAIM_TTL_SECONDS = int(os.getenv("CLAIM_TTL_SECONDS", "180"))
 PAYMENT_TTL_SECONDS = int(os.getenv("PAYMENT_TTL_SECONDS", "600"))
 DEPOSIT_PER_PERSON = int(os.getenv("DEPOSIT_PER_PERSON", "100000"))
