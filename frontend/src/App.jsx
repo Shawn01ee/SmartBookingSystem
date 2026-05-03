@@ -726,6 +726,7 @@ function PaymentPage({ token }) {
 // ── ADMIN PAGE ──────────────────────────────────────────────
 function AdminPage() {
   const [token, setToken] = useState(() => window.localStorage.getItem(ADMIN_KEY) || "");
+  const [inputToken, setInputToken] = useState("");
   const [dashboard, setDashboard] = useState(null);
   const [message, setMessage] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -770,13 +771,13 @@ function AdminPage() {
   async function login(e) {
     e.preventDefault(); setMessage(null);
     try {
-      await apiFetch("/api/admin/session", { method: "POST", body: JSON.stringify({ token }) });
-      window.localStorage.setItem(ADMIN_KEY, token);
-      await refresh({ kind: "info", text: "로그인 성공." });
+      await apiFetch("/api/admin/session", { method: "POST", body: JSON.stringify({ token: inputToken }) });
+      window.localStorage.setItem(ADMIN_KEY, inputToken);
+      setToken(inputToken);
     } catch (err) { setMessage({ kind: "error", text: err.message }); }
   }
 
-  function logout() { window.localStorage.removeItem(ADMIN_KEY); setToken(""); setDashboard(null); setMessage(null); }
+  function logout() { window.localStorage.removeItem(ADMIN_KEY); setToken(""); setInputToken(""); setDashboard(null); setMessage(null); }
 
   async function submitRestaurant(e) {
     e.preventDefault();
@@ -820,7 +821,7 @@ function AdminPage() {
         <form onSubmit={login}>
           <div className="admin-field">
             <label>Admin Token</label>
-            <input value={token} onChange={e => setToken(e.target.value)} placeholder="admin123" />
+            <input value={inputToken} onChange={e => setInputToken(e.target.value)} placeholder="admin123" />
           </div>
           <button className="admin-btn" type="submit" style={{ width: "100%", marginTop: 16 }}>로그인</button>
         </form>
