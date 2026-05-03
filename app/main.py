@@ -874,6 +874,12 @@ def spa() -> FileResponse:
     return FileResponse(path, headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
 
+@app.get("/og-image.png")
+def og_image() -> FileResponse:
+    path = FRONTEND_DIST_PATH / "og-image.png"
+    return FileResponse(str(path), media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
+
+
 @app.get("/")
 def index() -> FileResponse:
     return spa()
