@@ -13,6 +13,7 @@ from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from .config import ADMIN_TOKEN, APP_NAME, DEV_FALLBACK_ADMIN_TOKEN, IS_VERCEL
+from .emailer import send_email
 from .db import ENGINE, SessionLocal
 from .engine import (
     accept_claim_and_create_payment,
@@ -240,7 +241,7 @@ def seed_demo_data(db: Session) -> None:
     db.add_all(tables)
 
     today = date.today()
-    slot_times = [time(18, 0), time(19, 0), time(20, 0)]
+    slot_times = [time(12, 0), time(13, 0), time(18, 0), time(19, 0), time(20, 0)]
     for offset in range(3):
         day = today + timedelta(days=offset)
         for slot_time in slot_times:
@@ -489,11 +490,56 @@ def get_payment(token: str, db: Session = Depends(get_db)) -> PaymentOut:
     return PaymentOut(**payment_summary(db, payment))
 
 
+@app.get("/api/public/reservations/booked-slots")
+def get_booked_slots(email: str, db: Session = Depends(get_db)) -> dict:
+    """Return slot IDs and days that this email already has active reservations for."""
+    from .models import Reservation as Res
+    reservations = (
+        db.query(Res)
+        .filter(Res.guest_email == normalize_email(email), Res.status.in_(["confirmed", "pending"]))
+        .all()
+    )
+    return {
+        "booked_slot_ids": [r.slot_id for r in reservations],
+        "booked_days": list({r.slot.day.isoformat() for r in reservations if r.slot}),
+    }
+
+
 @app.post("/api/public/payments/{token}/complete")
 def complete_payment(token: str, db: Session = Depends(get_db)) -> dict:
     result = complete_payment_and_confirm_reservation(db, token)
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result["reason"])
+    # Send confirmation email
+    payment = db.query(Payment).filter(Payment.token == token).first()
+    if payment and payment.reservation:
+        r = payment.reservation
+        slot = db.query(Slot).filter(Slot.id == r.slot_id).first()
+        rest = db.query(Restaurant).filter(Restaurant.id == slot.restaurant_id).first() if slot else None
+        day_str = slot.day.strftime("%Y년 %m월 %d일") if slot else "—"
+        time_str = slot.time.strftime("%H:%M") if slot else "—"
+        rest_name = rest.name if rest else "—"
+        send_email(
+            r.guest_email,
+            f"[{APP_NAME}] 예약이 확정되었습니다",
+            f"""안녕하세요, {r.guest_name}님.
+
+예약이 확정되었습니다.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+레스토랑  {rest_name}
+날 짜     {day_str}
+시 간     {time_str}
+인 원     {r.party_size}명
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+예약 시간 15분 전부터 입장 가능합니다.
+예약 시간보다 15분 이상 늦으실 경우 예약이 취소될 수 있습니다.
+
+감사합니다.
+{APP_NAME}
+""",
+        )
     return result
 
 

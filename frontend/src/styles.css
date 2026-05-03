@@ -204,7 +204,10 @@ button, input, select, textarea { font: inherit; }
 }
 .date-chip.sel { background: var(--ink); color: white; border-color: var(--ink); }
 .date-chip.sel .dc-day { color: rgba(255,255,255,0.6); }
-.date-chip:hover:not(.sel) { border-color: var(--ink); }
+.date-chip:hover:not(.sel):not(.booked) { border-color: var(--ink); }
+.date-chip.booked { opacity: 0.45; cursor: not-allowed; background: var(--parchment); }
+.date-chip.booked .dc-day { color: var(--sepia-light); }
+.chip-booked-label { font-family: 'Cormorant SC', serif; font-size: 8px; letter-spacing: 0.12em; color: var(--danger); margin-top: 2px; }
 
 .time-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 24px; }
 .time-chip {
@@ -215,7 +218,8 @@ button, input, select, textarea { font: inherit; }
   cursor: pointer; transition: all 0.15s;
 }
 .time-chip.sel { background: var(--ink); color: white; border-color: var(--ink); }
-.time-chip:hover:not(.sel) { border-color: var(--ink); }
+.time-chip:hover:not(.sel):not(.booked) { border-color: var(--ink); }
+.time-chip.booked { opacity: 0.4; cursor: not-allowed; background: var(--parchment); color: var(--sepia-light); }
 
 /* Party chips */
 .party-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }

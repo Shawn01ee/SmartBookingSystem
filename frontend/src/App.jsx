@@ -83,6 +83,10 @@ function GuestPage() {
   const [selParty, setSelParty] = useState(2);
   const [selCourse, setSelCourse] = useState(COURSES[1]); // default: Dinner
 
+  // booked slots for the verified email
+  const [bookedDays, setBookedDays] = useState([]);
+  const [bookedSlotIds, setBookedSlotIds] = useState([]);
+
   // guest info
   const [guestName, setGuestName] = useState("");
   const [guestPhone, setGuestPhone] = useState("");
@@ -177,8 +181,8 @@ function GuestPage() {
 
   async function confirmCode(email, code, setVerified, setMsg) {
     const n = normalizeEmail(email);
-    if (!n) { setMsg({ kind: "error", text: "이메일을 입력해 주세요." }); return; }
-    if (!code.trim()) { setMsg({ kind: "error", text: "인증번호를 입력해 주세요." }); return; }
+    if (!n) { setMsg({ kind: "error", text: "이메일을 입력해 주세요." }); return false; }
+    if (!code.trim()) { setMsg({ kind: "error", text: "인증번호를 입력해 주세요." }); return false; }
     setMsg(null);
     try {
       await apiFetch("/api/public/email-verifications/confirm", {
@@ -186,7 +190,16 @@ function GuestPage() {
       });
       setVerified(n);
       setMsg({ kind: "info", text: "인증이 완료되었습니다." });
-    } catch (e) { setMsg({ kind: "error", text: e.message }); }
+      return true;
+    } catch (e) { setMsg({ kind: "error", text: e.message }); return false; }
+  }
+
+  async function fetchBookedSlots(email) {
+    try {
+      const data = await apiFetch(`/api/public/reservations/booked-slots?email=${encodeURIComponent(email)}`);
+      setBookedDays(data.booked_days || []);
+      setBookedSlotIds(data.booked_slot_ids || []);
+    } catch (_) {}
   }
 
   async function submitReservation() {
@@ -251,8 +264,9 @@ function GuestPage() {
   const STEP_TITLES = { booking: "예약 날짜 선택", guest: "방문자 정보 입력", deposit: "예약금 안내" };
   const STEP_NUM = { booking: 1, guest: 2, deposit: 3 };
 
-  const canStep1 = selSlotId && selParty && selCourse;
-  const canStep2 = guestName && guestPhone && verifiedEmail && verifiedEmail === normalizeEmail(guestEmail);
+  const isSelectedSlotBooked = bookedSlotIds.includes(selSlotId);
+  const canStep1 = selSlotId && selParty && selCourse && !isSelectedSlotBooked;
+  const canStep2 = guestName && guestPhone && verifiedEmail && verifiedEmail === normalizeEmail(guestEmail) && !isSelectedSlotBooked;
 
   if (loading) {
     return (
@@ -364,25 +378,37 @@ function GuestPage() {
 
                     <span className="sel-label">날짜 선택</span>
                     <div className="slot-date-grid">
-                      {slotGroups.map(([day]) => (
-                        <div key={day} className={`date-chip ${selDay === day ? "sel" : ""}`}
-                          onClick={() => { setSelDay(day); setSelSlotId(slots.find(s => s.day === day)?.id || null); }}>
-                          <span className="dc-day">{fmtDate(day).slice(0, 5)}</span>
-                          {day.slice(8)}
-                        </div>
-                      ))}
+                      {slotGroups.map(([day]) => {
+                        const isDayBooked = bookedDays.includes(day);
+                        return (
+                          <div key={day}
+                            className={`date-chip ${selDay === day && !isDayBooked ? "sel" : ""} ${isDayBooked ? "booked" : ""}`}
+                            onClick={() => {
+                              if (isDayBooked) return;
+                              setSelDay(day); setSelSlotId(slots.find(s => s.day === day)?.id || null);
+                            }}>
+                            <span className="dc-day">{fmtDate(day).slice(0, 5)}</span>
+                            {day.slice(8)}
+                            {isDayBooked && <span className="chip-booked-label">예약됨</span>}
+                          </div>
+                        );
+                      })}
                     </div>
 
                     {selDay && (
                       <>
                         <span className="sel-label">시간 선택</span>
                         <div className="time-chips">
-                          {timeSlotsForDay.map(slot => (
-                            <div key={slot.id} className={`time-chip ${selSlotId === slot.id ? "sel" : ""}`}
-                              onClick={() => setSelSlotId(slot.id)}>
-                              {formatTime(slot.time)}
-                            </div>
-                          ))}
+                          {timeSlotsForDay.map(slot => {
+                            const isSlotBooked = bookedSlotIds.includes(slot.id);
+                            return (
+                              <div key={slot.id}
+                                className={`time-chip ${selSlotId === slot.id && !isSlotBooked ? "sel" : ""} ${isSlotBooked ? "booked" : ""}`}
+                                onClick={() => { if (!isSlotBooked) setSelSlotId(slot.id); }}>
+                                {formatTime(slot.time)}
+                              </div>
+                            );
+                          })}
                         </div>
                       </>
                     )}
@@ -448,7 +474,10 @@ function GuestPage() {
                             onClick={() => requestCode(guestEmail, setVerMsg)}>코드 보내기</button>
                           <button className="verify-btn" type="button"
                             id="reservation-verify-code"
-                            onClick={() => confirmCode(guestEmail, verCode, setVerifiedEmail, setVerMsg)}>코드 확인</button>
+                            onClick={async () => {
+                              const ok = await confirmCode(guestEmail, verCode, setVerifiedEmail, setVerMsg);
+                              if (ok) fetchBookedSlots(normalizeEmail(guestEmail));
+                            }}>코드 확인</button>
                         </div>
                         {verMsg && <div className={`verify-msg ${verMsg.kind}`}>{verMsg.text}</div>}
                         <div className={`verify-badge ${verifiedEmail && verifiedEmail === normalizeEmail(guestEmail) ? "done" : "pending"}`}
@@ -457,6 +486,11 @@ function GuestPage() {
                         </div>
                       </div>
                     </div>
+                    {isSelectedSlotBooked && (
+                      <div className="verify-msg error" style={{ marginTop: 12 }}>
+                        이 이메일로 이미 예약된 날짜/시간입니다. 이전 단계로 돌아가 다른 시간대를 선택해 주세요.
+                      </div>
+                    )}
                     {modalMsg && <div className={`verify-msg ${modalMsg.kind}`} style={{ marginTop: 16 }}>{modalMsg.text}</div>}
                   </>
                 )}
