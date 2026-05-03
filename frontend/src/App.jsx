@@ -209,7 +209,18 @@ function GuestPage() {
         setModalMsg({ kind: "error", text: "해당 슬롯은 만석입니다. 대기 등록을 이용해 주세요." });
         return;
       }
-      window.location.href = `/pay/${result.payment_token}`;
+      // Complete payment in the same serverless instance to avoid DB reset on redirect
+      await apiFetch(`/api/public/payments/${result.payment_token}/complete`, { method: "POST" });
+      setBooking({
+        restaurant: selectedRestaurant?.name,
+        day: selDay,
+        time: selectedSlot ? formatTime(selectedSlot.time) : "—",
+        party: selParty,
+        course: selCourse?.name,
+        deposit: selParty * DEPOSIT_PER_PERSON,
+      });
+      closeModal();
+      setView("success");
     } catch (e) { setModalMsg({ kind: "error", text: e.message }); }
   }
 
@@ -303,11 +314,12 @@ function GuestPage() {
           <div className="success-card">
             {[
               ["레스토랑", booking.restaurant],
+              ["코스", booking.course],
               ["날짜", fmtDate(booking.day)],
               ["시간", booking.time],
               ["인원", `${booking.party}명`],
-              ["예약금", `${booking.deposit.toLocaleString()}원`],
-            ].map(([l, v]) => (
+              ["납부 보증금", `${booking.deposit.toLocaleString()}원`],
+            ].filter(([, v]) => v).map(([l, v]) => (
               <div key={l} className="success-row">
                 <span className="success-row-lbl">{l}</span>
                 <span className="success-row-val">{v}</span>
