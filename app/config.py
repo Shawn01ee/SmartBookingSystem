@@ -7,8 +7,14 @@ from pathlib import Path
 APP_NAME = "Smart Booking System"
 BASE_DIR = Path(__file__).resolve().parent.parent
 IS_VERCEL = bool(os.getenv("VERCEL"))
-DB_PATH = Path("/tmp/restaurant_booking.db") if IS_VERCEL else BASE_DIR / "restaurant_booking.db"
-DATABASE_URL = f"sqlite:///{DB_PATH}"
+
+_db_url_env = os.getenv("DATABASE_URL", "")
+if _db_url_env:
+    # Neon / Heroku use postgres:// — SQLAlchemy requires postgresql://
+    DATABASE_URL = _db_url_env.replace("postgres://", "postgresql://", 1)
+else:
+    _db_path = Path("/tmp/restaurant_booking.db") if IS_VERCEL else BASE_DIR / "restaurant_booking.db"
+    DATABASE_URL = f"sqlite:///{_db_path}"
 
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "admin123")
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://127.0.0.1:8000")

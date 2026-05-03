@@ -12,4 +12,5 @@ dependencies = [
     "apscheduler==3.10.4",
     "email-validator==2.2.0",
     "httpx==0.28.1",
+    "psycopg2-binary>=2.9",
 ]
