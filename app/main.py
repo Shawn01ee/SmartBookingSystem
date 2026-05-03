@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
-from .config import ADMIN_TOKEN, APP_NAME, DEV_FALLBACK_ADMIN_TOKEN
+from .config import ADMIN_TOKEN, APP_NAME, DEV_FALLBACK_ADMIN_TOKEN, IS_VERCEL
 from .db import ENGINE, SessionLocal
 from .engine import (
     accept_claim_and_create_payment,
@@ -56,7 +56,8 @@ FRONTEND_DIST_PATH = FRONTEND_PATH / "dist"
 FRONTEND_ASSETS_PATH = FRONTEND_DIST_PATH / "assets"
 
 app = FastAPI(title=APP_NAME)
-app.mount("/static", StaticFiles(directory=STATIC_PATH), name="static")
+if STATIC_PATH.exists():
+    app.mount("/static", StaticFiles(directory=STATIC_PATH), name="static")
 app.mount("/assets", StaticFiles(directory=FRONTEND_ASSETS_PATH, check_dir=False), name="assets")
 app.add_middleware(
     CORSMiddleware,
@@ -281,10 +282,11 @@ def on_startup() -> None:
     finally:
         db.close()
 
-    scheduler = BackgroundScheduler()
-    scheduler.add_job(engine_tick, "interval", seconds=20)
-    scheduler.start()
-    app.state.scheduler = scheduler
+    if not IS_VERCEL:
+        scheduler = BackgroundScheduler()
+        scheduler.add_job(engine_tick, "interval", seconds=20)
+        scheduler.start()
+        app.state.scheduler = scheduler
 
 
 @app.on_event("shutdown")

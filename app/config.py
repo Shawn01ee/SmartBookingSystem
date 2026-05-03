@@ -6,7 +6,8 @@ from pathlib import Path
 
 APP_NAME = "Smart Booking System"
 BASE_DIR = Path(__file__).resolve().parent.parent
-DB_PATH = BASE_DIR / "restaurant_booking.db"
+IS_VERCEL = bool(os.getenv("VERCEL"))
+DB_PATH = Path("/tmp/restaurant_booking.db") if IS_VERCEL else BASE_DIR / "restaurant_booking.db"
 DATABASE_URL = f"sqlite:///{DB_PATH}"
 
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "admin123")
