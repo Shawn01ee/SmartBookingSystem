@@ -229,6 +229,26 @@ def _ensure_weekly_slots(db: Session, restaurant: Restaurant) -> None:
         db.commit()
 
 
+# Module-level cache so Vercel warm instances don't re-run every request
+_last_maintenance_date: date | None = None
+
+
+def daily_slot_maintenance() -> None:
+    """Ensure a rolling 7-day window of slots exists for every restaurant.
+    Safe to call on every request — skips if already run today."""
+    global _last_maintenance_date
+    today = date.today()
+    if _last_maintenance_date == today:
+        return
+    db = SessionLocal()
+    try:
+        for restaurant in db.query(Restaurant).all():
+            _ensure_weekly_slots(db, restaurant)
+        _last_maintenance_date = today
+    finally:
+        db.close()
+
+
 def seed_demo_data(db: Session) -> None:
     existing_mosu = db.query(Restaurant).filter(Restaurant.name == "Mosu Seoul").first()
     if existing_mosu:
@@ -304,6 +324,8 @@ def on_startup() -> None:
     if not IS_VERCEL:
         scheduler = BackgroundScheduler()
         scheduler.add_job(engine_tick, "interval", seconds=20)
+        # Roll the 7-day window forward every day at 00:01 local time
+        scheduler.add_job(daily_slot_maintenance, "cron", hour=0, minute=1)
         scheduler.start()
         app.state.scheduler = scheduler
 
@@ -371,6 +393,7 @@ def list_public_restaurants(db: Session = Depends(get_db)) -> list[dict]:
 
 @app.get("/api/public/restaurants/{restaurant_id}/slots")
 def list_public_slots(restaurant_id: int, db: Session = Depends(get_db)) -> list[dict]:
+    daily_slot_maintenance()  # rolling 7-day window — no-op if already run today
     slots = (
         db.query(Slot)
         .filter(Slot.restaurant_id == restaurant_id, Slot.is_open.is_(True))
