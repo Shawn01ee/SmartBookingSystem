@@ -530,8 +530,11 @@ def complete_payment(token: str, db: Session = Depends(get_db)) -> dict:
         raise HTTPException(status_code=400, detail=result["reason"])
     # Send confirmation email
     payment = db.query(Payment).filter(Payment.token == token).first()
-    if payment and payment.reservation:
-        r = payment.reservation
+    if payment:
+        r = db.query(Reservation).filter(Reservation.id == payment.reservation_id).first()
+    else:
+        r = None
+    if r:
         slot = db.query(Slot).filter(Slot.id == r.slot_id).first()
         rest = db.query(Restaurant).filter(Restaurant.id == slot.restaurant_id).first() if slot else None
         day_str = slot.day.strftime("%Y년 %m월 %d일") if slot else "—"
