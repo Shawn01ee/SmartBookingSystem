@@ -155,7 +155,7 @@ def find_duplicate_reservation(
         .filter(
             Reservation.restaurant_id == restaurant_id,
             Reservation.slot_id == slot_id,
-            Reservation.status.in_(["pending", "confirmed"]),
+            Reservation.status == "confirmed",
         )
         .all()
     )
@@ -355,6 +355,8 @@ def create_pending_reservation_and_payment(
 ) -> dict:
     normalized_email = normalize_email(guest_email)
     normalized_phone = normalize_phone(phone_number)
+
+    # Block only confirmed reservations; cancel stale pending ones so user can retry
     duplicate_reservation = find_duplicate_reservation(
         db,
         restaurant_id,
@@ -368,6 +370,28 @@ def create_pending_reservation_and_payment(
             "reason": "duplicate_reservation",
             "existing_reservation_id": duplicate_reservation.id,
         }
+
+    # Clean up any stuck "pending" reservations for the same slot + guest
+    stale_list = (
+        db.query(Reservation)
+        .filter(
+            Reservation.restaurant_id == restaurant_id,
+            Reservation.slot_id == slot_id,
+            Reservation.status == "pending",
+        )
+        .all()
+    )
+    for stale in stale_list:
+        if same_identity(stale.guest_email, stale.phone_number, normalized_email, normalized_phone):
+            stale.status = "cancelled"
+            stale_payment = (
+                db.query(Payment)
+                .filter(Payment.reservation_id == stale.id, Payment.status == "pending")
+                .first()
+            )
+            if stale_payment:
+                stale_payment.status = "failed"
+    db.commit()
 
     tables = find_best_tables(db, restaurant_id, slot_id, party_size, max_tables=3)
     if not tables:

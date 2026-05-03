@@ -514,7 +514,7 @@ def get_booked_slots(email: str, db: Session = Depends(get_db)) -> dict:
     from .models import Reservation as Res
     reservations = (
         db.query(Res)
-        .filter(Res.guest_email == normalize_email(email), Res.status.in_(["confirmed", "pending"]))
+        .filter(Res.guest_email == normalize_email(email), Res.status == "confirmed")
         .all()
     )
     return {
