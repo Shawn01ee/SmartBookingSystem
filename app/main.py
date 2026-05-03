@@ -764,6 +764,8 @@ def admin_delete_all_reservations(
     db.query(Claim).delete(synchronize_session=False)
     db.query(WaitlistRequest).delete(synchronize_session=False)
     db.query(OpenSlot).delete(synchronize_session=False)
+    # Reset all slots to open (no confirmed reservations remain)
+    db.query(Slot).update({"is_open": True}, synchronize_session=False)
     db.commit()
     return {"ok": True, "deleted": len(res_ids)}
 
@@ -777,10 +779,27 @@ def admin_delete_waitlist(
     waitlist = db.get(WaitlistRequest, waitlist_id)
     if not waitlist:
         raise HTTPException(status_code=404, detail="Waitlist request not found")
+    restaurant_id = waitlist.restaurant_id
+    slot_day = waitlist.day
     db.query(NotificationLog).filter(NotificationLog.waitlist_id == waitlist_id).delete(synchronize_session=False)
     db.query(Claim).filter(Claim.waitlist_id == waitlist_id).delete(synchronize_session=False)
     db.query(WaitlistRequest).filter(WaitlistRequest.id == waitlist_id).delete(synchronize_session=False)
     db.commit()
+    # If no waitlists remain for this restaurant/day, deactivate matching open slots
+    remaining = db.query(WaitlistRequest).filter(
+        WaitlistRequest.restaurant_id == restaurant_id,
+        WaitlistRequest.day == slot_day,
+        WaitlistRequest.status.in_(["active", "offered"]),
+    ).count()
+    if remaining == 0:
+        slot_ids = [s.id for s in db.query(Slot.id).filter(
+            Slot.restaurant_id == restaurant_id, Slot.day == slot_day
+        ).all()]
+        if slot_ids:
+            db.query(OpenSlot).filter(
+                OpenSlot.slot_id.in_(slot_ids), OpenSlot.is_active.is_(True)
+            ).update({"is_active": False}, synchronize_session=False)
+            db.commit()
     return {"ok": True}
 
 
