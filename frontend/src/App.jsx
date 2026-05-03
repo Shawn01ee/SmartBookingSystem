@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 
 const ADMIN_KEY = "smart-booking-admin-token";
-const DEPOSIT_PER_PERSON = 5000;
+const DEPOSIT_PER_PERSON = 100000;
 const DAY_KO = ["일", "월", "화", "수", "목", "금", "토"];
+const COURSES = [
+  { id: "lunch", name: "Lunch Tasting Course", desc: "점심 테이스팅 코스", price: 320000 },
+  { id: "dinner", name: "Dinner Tasting Course", desc: "저녁 테이스팅 코스", price: 420000 },
+];
 
 function getRoute(pathname = window.location.pathname) {
   if (pathname.startsWith("/admin")) return { name: "admin" };
@@ -77,6 +81,7 @@ function GuestPage() {
   const [selDay, setSelDay] = useState(null);
   const [selSlotId, setSelSlotId] = useState(null);
   const [selParty, setSelParty] = useState(2);
+  const [selCourse, setSelCourse] = useState(COURSES[1]); // default: Dinner
 
   // guest info
   const [guestName, setGuestName] = useState("");
@@ -235,7 +240,7 @@ function GuestPage() {
   const STEP_TITLES = { booking: "예약 날짜 선택", guest: "방문자 정보 입력", deposit: "예약금 안내" };
   const STEP_NUM = { booking: 1, guest: 2, deposit: 3 };
 
-  const canStep1 = selSlotId && selParty;
+  const canStep1 = selSlotId && selParty && selCourse;
   const canStep2 = guestName && guestPhone && verifiedEmail && verifiedEmail === normalizeEmail(guestEmail);
 
   if (loading) {
@@ -377,6 +382,20 @@ function GuestPage() {
                           onClick={() => setSelParty(n)}>{n}명</div>
                       ))}
                     </div>
+
+                    <span className="sel-label">코스 선택</span>
+                    <div className="course-chips">
+                      {COURSES.map(c => (
+                        <div key={c.id} className={`course-chip ${selCourse?.id === c.id ? "sel" : ""}`}
+                          onClick={() => setSelCourse(c)}>
+                          <div className="course-chip-header">
+                            <div className="course-chip-name">{c.name}</div>
+                            <div className="course-chip-price">{c.price.toLocaleString()}원</div>
+                          </div>
+                          <div className="course-chip-desc">{c.desc}</div>
+                        </div>
+                      ))}
+                    </div>
                   </>
                 )}
 
@@ -435,7 +454,7 @@ function GuestPage() {
                   <>
                     <div className="confirm-card">
                       <div className="confirm-rest-name">{selectedRestaurant?.name}</div>
-                      <div className="confirm-rest-sub">파인다이닝 예약</div>
+                      <div className="confirm-rest-sub">{selCourse?.name}</div>
                       <div className="confirm-details">
                         <div className="confirm-detail">
                           <div className="confirm-detail-icon">📅</div>
@@ -453,13 +472,16 @@ function GuestPage() {
                     </div>
                     <div className="deposit-notice">
                       <span>ℹ</span>
-                      <span>인원에 따른 예약 보증금이 발생합니다. 결제 후 예약이 확정됩니다.</span>
+                      <span>예약 확정을 위한 보증금이 결제됩니다. 코스 요금은 현장에서 결제합니다.</span>
                     </div>
                     <table className="deposit-table">
                       <tbody>
-                        <tr><td>1인당 예약금</td><td>{DEPOSIT_PER_PERSON.toLocaleString()}원</td></tr>
+                        <tr><td>선택 코스</td><td>{selCourse?.name}</td></tr>
+                        <tr><td>코스 금액 (현장결제)</td><td>{selCourse?.price.toLocaleString()}원 / 인</td></tr>
+                        <tr className="deposit-divider"><td colSpan="2"></td></tr>
+                        <tr><td>1인당 예약 보증금</td><td>{DEPOSIT_PER_PERSON.toLocaleString()}원</td></tr>
                         <tr><td>× 총 예약 인원</td><td>{selParty}명</td></tr>
-                        <tr><td>합계</td><td>{deposit.toLocaleString()}원</td></tr>
+                        <tr className="deposit-total"><td>지금 결제 금액</td><td>{deposit.toLocaleString()}원</td></tr>
                       </tbody>
                     </table>
                     <div className="refund-box">
