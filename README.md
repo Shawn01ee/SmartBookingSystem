@@ -56,20 +56,18 @@ smart-booking-system/
 │  │  └─ styles.css        # React 스타일
 │  ├─ package.json         # Vite 스크립트와 의존성
 │  └─ vite.config.js       # Vite 설정과 API 프록시
-├─ requirements.txt
+├─ pyproject.toml
+├─ uv.lock
 └─ README.md
 ```
 
 ## 실행 방법
 
-권장 파이썬은 `3.11`입니다.  
-현재 맥 환경의 기본 `python3`가 `3.14`이면 일부 오래된 바이너리 패키지와 충돌할 수 있어서 `python3.11` 사용을 권장합니다.
+Python 3.12와 [uv](https://docs.astral.sh/uv/)가 필요합니다.
 
 ```bash
-cd /Users/lsm01/SLCSPJ/smart-booking-system
-/Users/lsm01/.local/bin/python3.11 -m venv .venv311
-.venv311/bin/pip install -r requirements.txt
-.venv311/bin/uvicorn app.main:app --reload
+uv sync
+uv run uvicorn app.main:app --reload
 ```
 
 브라우저에서 엽니다.
@@ -79,12 +77,12 @@ cd /Users/lsm01/SLCSPJ/smart-booking-system
 
 ## React + Vite 프런트
 
-프런트 소스는 [frontend](/Users/lsm01/SLCSPJ/smart-booking-system/frontend) 아래에 있습니다.
+프런트 소스는 [frontend/](frontend/) 아래에 있습니다.
 
 프로덕션 빌드:
 
 ```bash
-cd /Users/lsm01/SLCSPJ/smart-booking-system/frontend
+cd frontend
 npm install
 npm run build
 ```
@@ -95,11 +93,10 @@ npm run build
 
 ```bash
 # 터미널 1
-cd /Users/lsm01/SLCSPJ/smart-booking-system
-.venv311/bin/uvicorn app.main:app --reload --port 8000
+uv run uvicorn app.main:app --reload --port 8000
 
 # 터미널 2
-cd /Users/lsm01/SLCSPJ/smart-booking-system/frontend
+cd frontend
 npm install
 npm run dev
 ```
@@ -141,8 +138,7 @@ SMTP가 없으면 이메일 내용은 서버 콘솔에 출력됩니다.
 서버를 직접 띄우지 않아도 내부 API 흐름을 한 번에 점검할 수 있습니다.
 
 ```bash
-cd /Users/lsm01/SLCSPJ/smart-booking-system
-.venv311/bin/python scripts/smoke_test.py
+uv run python scripts/smoke_test.py
 ```
 
 ## 화면 설명
@@ -215,8 +211,6 @@ cd /Users/lsm01/SLCSPJ/smart-booking-system
 
 ## API 개념 설명
 
-네가 공부하고 싶다고 했던 API를 이 프로젝트 기준으로 아주 짧게 설명하면:
-
 `API는 화면과 서버가 대화하는 규칙`입니다.
 
 예를 들면:
@@ -246,20 +240,7 @@ cd /Users/lsm01/SLCSPJ/smart-booking-system
 - FastAPI는 데이터를 처리하는 서버 부분
 - API는 둘 사이의 약속
 
-## 프런트엔드 참고
-
-현재 프런트는 `app/static/app.js` 하나로 동작하는 빌드 없는 SPA 구조입니다.
-
-장점:
-
-- 별도 빌드 없이 바로 실행 가능
-- 회의용 데모나 초기 Foundation에 적합
-
-- 외부 프런트엔드 CDN 없이 로컬만으로 화면이 뜹니다.
-
 ## 검증한 흐름
-
-이 작업 중 아래 흐름을 실제로 검증했습니다.
 
 1. 예약 생성
 2. 이메일 인증코드 발송/확인
