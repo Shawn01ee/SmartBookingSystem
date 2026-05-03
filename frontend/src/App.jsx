@@ -358,7 +358,6 @@ function GuestPage() {
                 {r.name}
               </button>
             ))}
-            <button className="nav-link" onClick={openWaitlist}>대기 등록</button>
           </div>
           <div className="hero-nav-col right">
             <button className="nav-link" onClick={() => { setMyData(null); setMyMsg(null); setMyEmail(""); setModal("my_reservations"); }}>내 예약</button>
@@ -377,7 +376,6 @@ function GuestPage() {
               미슐랭 가이드 레스토랑을 위한<br />세련된 예약 경험. 당신의 특별한 저녁을 시작하세요.
             </div>
             <div className="hero-cta">
-              <button className="btn-ghost-light secondary" onClick={openWaitlist}>대기 등록</button>
               <button className="btn-ghost-light" onClick={openBooking}>예약하기</button>
             </div>
           </div>
