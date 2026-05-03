@@ -159,6 +159,14 @@ function GuestPage() {
   const selectedRestaurant = restaurants.find(r => String(r.id) === String(selectedRestaurantId));
   const deposit = selParty * DEPOSIT_PER_PERSON;
 
+  const isLunchSlot = selectedSlot && (selectedSlot.time.startsWith("12") || selectedSlot.time.startsWith("13"));
+
+  useEffect(() => {
+    if (!selectedSlot) return;
+    const lunch = selectedSlot.time.startsWith("12") || selectedSlot.time.startsWith("13");
+    setSelCourse(COURSES[lunch ? 0 : 1]);
+  }, [selSlotId]);
+
   function openBooking() {
     setStep(1); setModal("booking");
     setModalMsg(null); setVerMsg(null);
@@ -415,7 +423,7 @@ function GuestPage() {
 
                     <span className="sel-label">인원</span>
                     <div className="party-chips">
-                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => (
+                      {[1, 2, 3, 4, 5, 6].map(n => (
                         <div key={n} className={`party-chip ${selParty === n ? "sel" : ""}`}
                           onClick={() => setSelParty(n)}>{n}명</div>
                       ))}
@@ -423,16 +431,20 @@ function GuestPage() {
 
                     <span className="sel-label">코스 선택</span>
                     <div className="course-chips">
-                      {COURSES.map(c => (
-                        <div key={c.id} className={`course-chip ${selCourse?.id === c.id ? "sel" : ""}`}
-                          onClick={() => setSelCourse(c)}>
-                          <div className="course-chip-header">
-                            <div className="course-chip-name">{c.name}</div>
-                            <div className="course-chip-price">{c.price.toLocaleString()}원</div>
+                      {COURSES.map(c => {
+                        const allowed = isLunchSlot ? c.id === "lunch" : c.id === "dinner";
+                        return (
+                          <div key={c.id}
+                            className={`course-chip ${selCourse?.id === c.id ? "sel" : ""} ${!allowed ? "disabled" : ""}`}
+                            onClick={() => { if (allowed) setSelCourse(c); }}>
+                            <div className="course-chip-header">
+                              <div className="course-chip-name">{c.name}</div>
+                              <div className="course-chip-price">{c.price.toLocaleString()}원</div>
+                            </div>
+                            <div className="course-chip-desc">{c.desc}</div>
                           </div>
-                          <div className="course-chip-desc">{c.desc}</div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </>
                 )}

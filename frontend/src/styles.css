@@ -351,7 +351,8 @@ button, input, select, textarea { font: inherit; }
   background: white;
 }
 .course-chip.sel { background: var(--ink); color: var(--cream); border-color: var(--ink); }
-.course-chip:hover:not(.sel) { border-color: var(--ink); }
+.course-chip:hover:not(.sel):not(.disabled) { border-color: var(--ink); }
+.course-chip.disabled { opacity: 0.35; cursor: not-allowed; background: var(--parchment); }
 .course-chip-header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
 .course-chip-name {
   font-family: 'Cormorant Garamond', serif;
