@@ -233,7 +233,8 @@ function GuestPage() {
         })},
       );
       if (!result.ok && result.status === "waitlist_recommended") {
-        setModalMsg({ kind: "error", text: "해당 슬롯은 만석입니다. 대기 등록을 이용해 주세요." });
+        setModalMsg(null);
+        setModal("waitlist_auto");
         return;
       }
       // Complete payment in the same serverless instance to avoid DB reset on redirect
@@ -245,6 +246,38 @@ function GuestPage() {
         party: selParty,
         course: selCourse?.name,
         deposit: selParty * DEPOSIT_PER_PERSON,
+        waitlist: false,
+      });
+      closeModal();
+      setView("success");
+    } catch (e) { setModalMsg({ kind: "error", text: e.message }); }
+  }
+
+  async function submitAutoWaitlist() {
+    setModalMsg(null);
+    try {
+      const slotTime = selectedSlot?.time || "00:00:00";
+      const result = await apiFetch(
+        `/api/public/restaurants/${selectedRestaurantId}/waitlist`,
+        { method: "POST", body: JSON.stringify({
+          day: selDay,
+          time_start: slotTime,
+          time_end: slotTime,
+          party_size: selParty,
+          guest_name: guestName,
+          guest_email: guestEmail,
+          phone_number: guestPhone,
+          notes: selCourse?.name || "",
+        })},
+      );
+      setBooking({
+        restaurant: selectedRestaurant?.name,
+        day: selDay,
+        time: selectedSlot ? formatTime(selectedSlot.time) : "—",
+        party: selParty,
+        course: selCourse?.name,
+        waitlist: true,
+        waitlistId: result.waitlist_id,
       });
       closeModal();
       setView("success");
@@ -334,20 +367,31 @@ function GuestPage() {
       <div className={`screen success-screen ${view === "success" ? "active" : "hidden"}`}>
         <div className="success-ornament">
           <div className="success-ring"><span className="success-ring-inner">✦</span></div>
-          <div className="success-badge">RESERVATION CONFIRMED</div>
+          <div className="success-badge">{booking?.waitlist ? "WAITLIST REGISTERED" : "RESERVATION CONFIRMED"}</div>
         </div>
-        <div className="success-title">예약 완료</div>
-        <div className="success-sub">소중한 식사 시간을 기대하겠습니다</div>
+        <div className="success-title">{booking?.waitlist ? "대기 등록 완료" : "예약 완료"}</div>
+        <div className="success-sub">
+          {booking?.waitlist
+            ? "자리가 생기면 순서에 따라 이메일로 안내드립니다"
+            : "소중한 식사 시간을 기대하겠습니다"}
+        </div>
         {booking && (
           <div className="success-card">
-            {[
+            {(booking.waitlist ? [
               ["레스토랑", booking.restaurant],
               ["코스", booking.course],
               ["날짜", fmtDate(booking.day)],
               ["시간", booking.time],
               ["인원", `${booking.party}명`],
-              ["납부 보증금", `${booking.deposit.toLocaleString()}원`],
-            ].filter(([, v]) => v).map(([l, v]) => (
+              ["대기 번호", `#${booking.waitlistId}`],
+            ] : [
+              ["레스토랑", booking.restaurant],
+              ["코스", booking.course],
+              ["날짜", fmtDate(booking.day)],
+              ["시간", booking.time],
+              ["인원", `${booking.party}명`],
+              ["납부 보증금", `${booking.deposit?.toLocaleString()}원`],
+            ]).filter(([, v]) => v).map(([l, v]) => (
               <div key={l} className="success-row">
                 <span className="success-row-lbl">{l}</span>
                 <span className="success-row-val">{v}</span>
@@ -579,6 +623,46 @@ function GuestPage() {
                     <button className="modal-next-btn gold" onClick={submitReservation}>결제하기</button>
                   </>
                 )}
+              </div>
+            </>
+          )}
+
+          {/* AUTO WAITLIST STEP (만석 → 즉시 대기 등록) */}
+          {modal === "waitlist_auto" && (
+            <>
+              <div className="modal-head">
+                <button className="modal-close" onClick={closeModal}>×</button>
+                <div className="modal-step-label">— 예약 대기</div>
+                <div className="modal-title">만석 안내</div>
+              </div>
+              <div className="modal-body">
+                <div className="confirm-card">
+                  <div className="confirm-rest-name">{selectedRestaurant?.name}</div>
+                  <div className="confirm-rest-sub">{selCourse?.name}</div>
+                  <div className="confirm-details">
+                    <div className="confirm-detail">
+                      <div className="confirm-detail-icon">📅</div>
+                      <div className="confirm-detail-val">{fmtDate(selDay)}</div>
+                    </div>
+                    <div className="confirm-detail">
+                      <div className="confirm-detail-icon">🕐</div>
+                      <div className="confirm-detail-val">{selectedSlot ? formatTime(selectedSlot.time) : "—"}</div>
+                    </div>
+                    <div className="confirm-detail">
+                      <div className="confirm-detail-icon">👤</div>
+                      <div className="confirm-detail-val">{selParty}명</div>
+                    </div>
+                  </div>
+                </div>
+                <div className="deposit-notice" style={{ marginTop: 20 }}>
+                  <span>ℹ</span>
+                  <span>선택하신 시간대가 현재 만석입니다. 대기열에 등록하시면 예약 취소 발생 시 순서에 따라 이메일로 안내드립니다.</span>
+                </div>
+                {modalMsg && <div className={`verify-msg ${modalMsg.kind}`} style={{ marginTop: 16 }}>{modalMsg.text}</div>}
+              </div>
+              <div className="modal-foot">
+                <button className="modal-back-btn" onClick={() => { setModalMsg(null); setModal("booking"); }}>다른 시간 선택</button>
+                <button className="modal-next-btn gold" onClick={submitAutoWaitlist}>대기열 등록</button>
               </div>
             </>
           )}
