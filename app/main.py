@@ -208,9 +208,31 @@ def serialize_dashboard(db: Session) -> dict:
     }
 
 
+SLOT_TIMES = [time(12, 0), time(13, 0), time(18, 0), time(19, 0), time(20, 0)]
+
+
+def _ensure_weekly_slots(db: Session, restaurant: Restaurant) -> None:
+    today = date.today()
+    changed = False
+    for offset in range(7):
+        day = today + timedelta(days=offset)
+        for slot_time in SLOT_TIMES:
+            exists = (
+                db.query(Slot)
+                .filter(Slot.restaurant_id == restaurant.id, Slot.day == day, Slot.time == slot_time)
+                .first()
+            )
+            if not exists:
+                db.add(Slot(restaurant_id=restaurant.id, day=day, time=slot_time, is_open=True))
+                changed = True
+    if changed:
+        db.commit()
+
+
 def seed_demo_data(db: Session) -> None:
     existing_mosu = db.query(Restaurant).filter(Restaurant.name == "Mosu Seoul").first()
     if existing_mosu:
+        _ensure_weekly_slots(db, existing_mosu)
         return
 
     legacy_demo = db.query(Restaurant).filter(Restaurant.name.in_(["Seoul Table", "MOSU"])).first()
@@ -219,6 +241,7 @@ def seed_demo_data(db: Session) -> None:
         legacy_demo.contact_email = "ops@mosuseoul.local"
         legacy_demo.description = "Fine dining demo restaurant for smart scheduling."
         db.commit()
+        _ensure_weekly_slots(db, legacy_demo)
         return
 
     restaurant = Restaurant(
@@ -239,14 +262,9 @@ def seed_demo_data(db: Session) -> None:
         DiningTable(restaurant_id=restaurant.id, name="T6", capacity=6, combinable_group=None),
     ]
     db.add_all(tables)
-
-    today = date.today()
-    slot_times = [time(12, 0), time(13, 0), time(18, 0), time(19, 0), time(20, 0)]
-    for offset in range(3):
-        day = today + timedelta(days=offset)
-        for slot_time in slot_times:
-            db.add(Slot(restaurant_id=restaurant.id, day=day, time=slot_time, is_open=True))
     db.commit()
+
+    _ensure_weekly_slots(db, restaurant)
 
 
 class DispatchIn(BaseModel):

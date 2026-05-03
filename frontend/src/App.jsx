@@ -41,6 +41,11 @@ function groupedSlots(slots) {
   return Array.from(map.entries());
 }
 
+function filterFutureSlots(slots) {
+  const now = new Date();
+  return slots.filter(slot => new Date(`${slot.day}T${slot.time}`) > now);
+}
+
 async function apiFetch(path, options = {}, adminToken = null) {
   const headers = new Headers(options.headers || {});
   if (!headers.has("Content-Type") && options.body && !(options.body instanceof FormData)) {
@@ -143,11 +148,12 @@ function GuestPage() {
     let active = true;
     apiFetch(`/api/public/restaurants/${selectedRestaurantId}/slots`).then(data => {
       if (!active) return;
-      setSlots(data);
-      if (data[0]) {
-        setSelDay(data[0].day);
-        setSelSlotId(data[0].id);
-        setWaitDay(data[0].day);
+      const future = filterFutureSlots(data);
+      setSlots(future);
+      if (future[0]) {
+        setSelDay(future[0].day);
+        setSelSlotId(future[0].id);
+        setWaitDay(future[0].day);
       }
     }).catch(() => {});
     return () => { active = false; };
