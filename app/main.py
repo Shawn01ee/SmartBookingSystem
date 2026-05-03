@@ -777,11 +777,9 @@ def admin_delete_waitlist(
     waitlist = db.get(WaitlistRequest, waitlist_id)
     if not waitlist:
         raise HTTPException(status_code=404, detail="Waitlist request not found")
-    db.query(NotificationLog).filter(NotificationLog.waitlist_id == waitlist_id).delete()
-    claim = db.query(Claim).filter(Claim.waitlist_id == waitlist_id).first()
-    if claim:
-        db.delete(claim)
-    db.delete(waitlist)
+    db.query(NotificationLog).filter(NotificationLog.waitlist_id == waitlist_id).delete(synchronize_session=False)
+    db.query(Claim).filter(Claim.waitlist_id == waitlist_id).delete(synchronize_session=False)
+    db.query(WaitlistRequest).filter(WaitlistRequest.id == waitlist_id).delete(synchronize_session=False)
     db.commit()
     return {"ok": True}
 
